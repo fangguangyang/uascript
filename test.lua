@@ -209,6 +209,7 @@ server:addReference(source, reftype, target, isforward)
 -- start the server
 server:start()
 
+-- don't stop the server until somebody types 'q'
 while true do
    input = io.read("*l")
    if input == "q" then return end
