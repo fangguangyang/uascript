@@ -10,9 +10,37 @@ UA_Boolean isbuiltin(const UA_DataType *type) {
     return UA_TRUE;
 }
 
+ua_data * ua_getdata(lua_State *L, int index) {
+    ua_data *data = luaL_testudata(L, index , "open62541-data");
+    if(!data)
+        data = luaL_testudata(L, index , "open62541-builtin");
+    if(data)
+        return data;
+    /* try to convert */
+    if(lua_isboolean(L, index)) {
+        data = lua_newuserdata(L, sizeof(ua_data));
+        data->type = &UA_TYPES[UA_TYPES_BOOLEAN];
+        data->data = UA_Boolean_new();
+        *(UA_Boolean*)data->data = lua_toboolean(L, index);
+        luaL_setmetatable(L, "open62541-builtin");
+    } else if(lua_isnumber(L, index)) {
+        data = lua_newuserdata(L, sizeof(ua_data));
+        data->type = &UA_TYPES[UA_TYPES_INT32];
+        data->data = UA_Int32_new();
+        *(UA_Int32*)data->data = lua_tonumber(L, index);
+        luaL_setmetatable(L, "open62541-builtin");
+    } else if(lua_isstring(L, index)) {
+        data = lua_newuserdata(L, sizeof(ua_data));
+        data->type = &UA_TYPES[UA_TYPES_STRING];
+        data->data = UA_String_new();
+        *(UA_String*)data->data = UA_STRING_ALLOC(lua_tostring(L, index));
+        luaL_setmetatable(L, "open62541-builtin");
+    }
+    return data;
+}
+
 /* Guid */
-static UA_Guid
-parse_guid(lua_State *L, int index) {
+static UA_Guid parse_guid(lua_State *L, int index) {
     UA_Guid guid;
     UA_Guid_init(&guid);
     const char *arg = NULL;
@@ -47,37 +75,29 @@ parse_guid(lua_State *L, int index) {
 }
 
 /* NodeId */
-static void
-ua_nodeid_new(lua_State *L, UA_NodeId *id) {
-    if(lua_gettop(L) < 2) {
-        luaL_error(L, "nodeid takes two arguments");
-        return;
-    }
-    if(!lua_isnumber(L, 1)) {
+static UA_NodeId parse_nodeid(lua_State *L, int index) {
+    UA_NodeId id;
+    UA_NodeId_init(&id);
+    if(lua_isnil(L, index))
+        return id;
+    if(!lua_isnumber(L, index))
         luaL_error(L, "The first argument is no integer namespace id");
-        return;
-    }
-    if(!lua_isnumber(L, 2) && !lua_isstring(L, 2)) {
+    else if(!lua_isnumber(L, index+1) || !lua_isstring(L, index+1))
         luaL_error(L, "Currently, only numeric and string nodeids are implemented");
-        return;
+    else {
+        id.namespaceIndex = lua_tointeger(L, index);
+        if(lua_isnumber(L, index+1)) {
+            id.identifierType = UA_NODEIDTYPE_NUMERIC;
+            id.identifier.numeric = lua_tointeger(L, index+1);
+        } else if(lua_isstring(L, index+1)) {
+            id.identifierType = UA_NODEIDTYPE_STRING;
+            id.identifier.string = UA_String_fromChars(lua_tostring(L, 2));
+        } 
     }
-    lua_Integer nsindex = lua_tointeger(L, 1);
-    id->namespaceIndex = nsindex;
-    if(lua_isnumber(L, 2)) {
-        id->identifierType = UA_NODEIDTYPE_NUMERIC;
-        id->identifier.numeric = lua_tointeger(L, 2);
-    } else if(lua_isstring(L, 2)) {
-        id->identifierType = UA_NODEIDTYPE_STRING;
-        size_t length;
-        const char *array = lua_tolstring(L, 2, &length);
-        id->identifier.string = UA_String_fromChars(array);
-    } else
-        luaL_error(L, "Unknown nodeid type");
-    return;
+    return id;
 }
 
-static void
-ua_nodeid_tostring(lua_State *L, const UA_NodeId *id) {
+static void ua_nodeid_tostring(lua_State *L, const UA_NodeId *id) {
     if(id->identifierType == UA_NODEIDTYPE_NUMERIC)
         lua_pushfstring(L, "nodeid(ns=%d,i=%d)", id->namespaceIndex, id->identifier.numeric);
     else if(id->identifierType == UA_NODEIDTYPE_STRING) {
@@ -90,49 +110,37 @@ ua_nodeid_tostring(lua_State *L, const UA_NodeId *id) {
 }
 
 /* QualifiedName */
-static void
-ua_qualifiedname_new(lua_State *L, UA_QualifiedName *qn) {
-    if(lua_gettop(L) >= 2) {
-        if(!lua_isnumber(L, 1)) {
-            luaL_error(L, "The first argument is no integer namespace index");
-            return;
-        }
-        if(!lua_isstring(L, 2)) {
-            luaL_error(L, "The second argument is no string");
-            return;
-        }
-    } else if(lua_gettop(L) != 1) {
-        luaL_error(L, "Qualifiedname takes none or two arguments");
-        return;
+static UA_QualifiedName parse_qualifiedname(lua_State *L, int index) {
+    UA_QualifiedName qn;
+    UA_QualifiedName_init(&qn);
+    if(lua_isnil(L, index))
+        return qn;
+    if(!lua_isnumber(L, index))
+        luaL_error(L, "The first argument is no integer namespace index");
+    else if(!lua_isstring(L, index+1))
+        luaL_error(L, "The second argument is no string");
+    else {
+        qn.namespaceIndex = lua_tointeger(L, index);
+        qn.name = UA_STRING_ALLOC(lua_tostring(L, index+1));
     }
-
-    qn->namespaceIndex = lua_tointeger(L, 1);
-    if(lua_gettop(L) == 1)
-        return;
-    const char *array = lua_tostring(L, 2);
-    qn->name = UA_STRING_ALLOC(array);
-    return;
+    return qn;
 }
 
 /* LocalizedText */
-static void
-ua_localizedtext_new(lua_State *L, UA_LocalizedText *lt) {
-    if(lua_gettop(L) >= 2) {
-        if(!lua_isstring(L, 1)) {
+static UA_LocalizedText parse_localizedtext(lua_State *L, int index) {
+    UA_LocalizedText lt;
+    UA_LocalizedText_init(&lt);
+    if(lua_isnil(L, index))
+        return lt;
+    if(!lua_isstring(L, index))
             luaL_error(L, "The first argument is no string");
-            return;
-        }
-        if(!lua_isstring(L, 2)) {
+    else if(!lua_isstring(L, index+1))
             luaL_error(L, "The second argument is no string");
-            return;
-        }
-    } else
-        return;
-    const char *array = lua_tostring(L, 1);
-    lt->locale = UA_STRING_ALLOC(array);
-    array = lua_tostring(L, 2);
-    lt->text = UA_STRING_ALLOC(array);
-    return;
+    else {
+        lt.locale = UA_STRING_ALLOC(lua_tostring(L, index));
+        lt.text = UA_STRING_ALLOC(lua_tostring(L, index));
+    }
+    return lt;
 }
 
 /* Boolean */
@@ -142,7 +150,7 @@ ua_boolean_set(lua_State *L, UA_Boolean *b, int index) {
         *b = lua_toboolean(L, index);
         return;
     }
-    ua_data *data = luaL_checkudata (L, index, "open62541-data");
+    ua_data *data = luaL_checkudata (L, index, "open62541-builtin");
     if(!data || data->type != &UA_TYPES[UA_TYPES_BOOLEAN]) {
         luaL_error(L, "Cannot set boolean from the given type");
         return;
@@ -154,7 +162,7 @@ ua_boolean_set(lua_State *L, UA_Boolean *b, int index) {
 /* Variant */
 static void
 ua_variant_set(lua_State *L, UA_Variant *v, int index) {
-    ua_data *data = luaL_checkudata (L, index, "open62541-data");
+    ua_data *data = luaL_checkudata (L, index, "open62541-builtin");
     if(data) {
         UA_Variant_deleteMembers(v);
         UA_Variant_setScalarCopy(v, data->data, data->type);
@@ -191,8 +199,9 @@ pushlower(lua_State *L, const char *str) {
 
 static int
 ua_new_type_closure(lua_State *L) {
+    lua_pushnil(L); // separator between data from the user and what we add
     UA_DataType *type = lua_touserdata(L, lua_upvalueindex(1));
-    ua_data *data = lua_newuserdata(L, sizeof(ua_data)); // n+1
+    ua_data *data = lua_newuserdata(L, sizeof(ua_data));
     data->type = type;
     data->data = UA_new(type);
     if(isbuiltin(type))
@@ -201,22 +210,21 @@ ua_new_type_closure(lua_State *L) {
         luaL_setmetatable(L, "open62541-data");
 
     if(type == &UA_TYPES[UA_TYPES_STRING]) {
-        if(lua_gettop(L) == 1)
+        if(lua_isnil(L, 1))
             *(UA_String*)data->data = UA_STRING_NULL;   
-        else {
-            if(!lua_isstring(L, 1))
-                return luaL_error(L, "Argument is not a string");
-            *(UA_String*)data->data = UA_String_fromChars(lua_tostring(L, 1));
-        }
+        else if(!lua_isstring(L, 1))
+            return luaL_error(L, "Argument is not a string");
+        else
+            *(UA_String*)data->data = UA_STRING_ALLOC(lua_tostring(L, 1));
     }
     if(type == &UA_TYPES[UA_TYPES_GUID])
         *(UA_Guid*)data->data = parse_guid(L, 1);
     if(type == &UA_TYPES[UA_TYPES_NODEID])
-        ua_nodeid_new(L, data->data);
+        *(UA_NodeId*)data->data = parse_nodeid(L, 1);
     if(type == &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
-        ua_qualifiedname_new(L, data->data);
+        *(UA_QualifiedName*)data->data = parse_qualifiedname(L, 1);
     if(type == &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])
-        ua_localizedtext_new(L, data->data);
+        *(UA_LocalizedText*)data->data = parse_localizedtext(L, 1);
     return 1;
 }
 
@@ -267,13 +275,11 @@ memberptr(void *parent, const UA_DataType *type, int memberindex, UA_Int32 **arr
 }
 
 int ua_gc(lua_State *L) {
-    ua_data *data = luaL_testudata(L, -1, "open62541-data");
+    ua_data *data = ua_getdata(L, -1);
     if(!data)
-        data = luaL_testudata(L, -1, "open62541-builtin");
-    if(!data)
-        return luaL_error(L, "Cannot gc the data");
+        return 0;
     lua_getuservalue(L, -1);
-    /* if a uservalue is attached -> derived data is not deleted */
+    /* derived data is not deleted, tagged with a uservalue */
     if(lua_isnil(L, -1))
         UA_delete(data->data, data->type);
     return 0;
@@ -339,13 +345,9 @@ int ua_newindex(lua_State *L) {
         ua_boolean_set(L, member, 3);
         return 0;
     }
-    ua_data *value = luaL_testudata(L, -1, "open62541-builtin");
-    if(!value)
-        value = luaL_testudata(L, -1, "open62541-data");
-    if(!value)
-        return luaL_error(L, "No value of the correct type");
-    if(membertype != value->type)
-        return luaL_error(L, "Types don't match %d, %d", membertype->typeIndex, value->type->typeIndex);
+    ua_data *value = ua_getdata(L, -1);
+    if(!value || membertype != value->type)
+        return luaL_error(L, "Types don't match");
     if(arraylen)
         return luaL_error(L, "Cannot set arrays yet");
     UA_deleteMembers(member, membertype);
