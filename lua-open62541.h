@@ -2,9 +2,19 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
-#include "lua5.2/lua.h"
-#include "lua5.2/lauxlib.h"
-#include "lua5.2/lualib.h"
+
+//#define USE_LUAJIT
+
+#ifdef USE_LUAJIT
+# include "luajit-2.0/lua.h"
+# include "luajit-2.0/lauxlib.h"
+# include "luajit-2.0/lualib.h"
+# include "compat-5.2.h"
+#else
+# include "lua5.2/lua.h"
+# include "lua5.2/lauxlib.h"
+# include "lua5.2/lualib.h"
+#endif
 
 #include "open62541.h"
 
@@ -33,15 +43,18 @@ typedef struct {
     const UA_DataType *type;
     UA_Int32 *length;
     void **data;
+    /* normally, the array "points" into an ua_data userdata. but it can also
+       carry the data itself */
+    UA_Int32 local_length;
+    void *local_data;
 } ua_array;
 
 int ua_array_index(lua_State *L);
 int ua_array_len(lua_State *L);
 int ua_array_newindex(lua_State *L);
 int ua_array_append(lua_State *L);
-int ua_array_remove(lua_State *L);
-int ua_array_concat(lua_State *L);
 int ua_array_pairs(lua_State *L);
+ua_array * ua_getarray(lua_State *L, int index);
 
 /* Server */
 int ua_server_new(lua_State *L);
@@ -53,6 +66,7 @@ int ua_server_add_objectnode(lua_State *L);
 int ua_server_add_objecttypenode(lua_State *L);
 int ua_server_add_referencetypenode(lua_State *L);
 int ua_server_add_reference(lua_State *L);
+int ua_server_add_methodnode(lua_State *L);
 
 /* Populate the Module */
 int luaopen_open62541(lua_State *L);

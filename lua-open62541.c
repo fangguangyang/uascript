@@ -1,7 +1,7 @@
 #include "lua-open62541.h"
 
 static const struct luaL_Reg open62541 [] = {
-    {"server",   ua_server_new},
+    {"Server",   ua_server_new},
     {NULL, NULL} /* sentinel */
 };
 
@@ -47,7 +47,7 @@ static void addNodeIds(lua_State *L) {
     lua_setfield(L, -2, "nodeids");
 }
 
-int luaopen_open62541(lua_State *L) {
+int UA_EXPORT luaopen_open62541(lua_State *L) {
     /* metatable for builtin types */
     luaL_newmetatable(L, "open62541-builtin");
     lua_pushcfunction(L, ua_tostring);
@@ -91,6 +91,8 @@ int luaopen_open62541(lua_State *L) {
     lua_setfield(L, -2, "stop");
     lua_pushcfunction(L, ua_server_add_variablenode);
     lua_setfield(L, -2, "addVariableNode");
+    lua_pushcfunction(L, ua_server_add_methodnode);
+    lua_setfield(L, -2, "addMethodNode");
     lua_pushcfunction(L, ua_server_add_objectnode);
     lua_setfield(L, -2, "addObjectNode");
     lua_pushcfunction(L, ua_server_add_objecttypenode);
@@ -104,9 +106,6 @@ int luaopen_open62541(lua_State *L) {
 
     /* create the module */
     luaL_newlib(L, open62541);
-
-    /* if no member in the module is found, try to create a type-new function */
-    lua_newtable(L);
     ua_populate_types(L);
     lua_setfield(L, -2, "types");
 

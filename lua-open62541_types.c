@@ -1,6 +1,6 @@
 #include "lua-open62541.h"
 
-UA_Boolean isbuiltin(const UA_DataType *type) {
+static UA_Boolean isbuiltin(const UA_DataType *type) {
     if(type->typeIndex > UA_TYPES_DIAGNOSTICINFO)
         return UA_FALSE;
     if(type->typeIndex == UA_TYPES_LOCALIZEDTEXT ||
@@ -10,6 +10,7 @@ UA_Boolean isbuiltin(const UA_DataType *type) {
     return UA_TRUE;
 }
 
+/* if the data is transfomed, replace at the original index in the stack */
 ua_data * ua_getdata(lua_State *L, int index) {
     ua_data *data = luaL_testudata(L, index , "open62541-data");
     if(!data)
@@ -23,20 +24,77 @@ ua_data * ua_getdata(lua_State *L, int index) {
         data->data = UA_Boolean_new();
         *(UA_Boolean*)data->data = lua_toboolean(L, index);
         luaL_setmetatable(L, "open62541-builtin");
+        lua_replace(L, index);
     } else if(lua_isnumber(L, index)) {
         data = lua_newuserdata(L, sizeof(ua_data));
         data->type = &UA_TYPES[UA_TYPES_INT32];
         data->data = UA_Int32_new();
         *(UA_Int32*)data->data = lua_tonumber(L, index);
         luaL_setmetatable(L, "open62541-builtin");
+        lua_replace(L, index);
     } else if(lua_isstring(L, index)) {
         data = lua_newuserdata(L, sizeof(ua_data));
         data->type = &UA_TYPES[UA_TYPES_STRING];
         data->data = UA_String_new();
         *(UA_String*)data->data = UA_STRING_ALLOC(lua_tostring(L, index));
         luaL_setmetatable(L, "open62541-builtin");
+        lua_replace(L, index);
     }
     return data;
+}
+
+/* returns an array
+   - if the index points to one
+   - if its a lua array (table with increasing numeric entries)
+   and all the types match (we set type == null for the empty array) */
+ua_array * ua_getarray(lua_State *L, int index) {
+    ua_array *array = luaL_testudata(L, index , "open62541-array");
+    if(array || !lua_istable(L, index))
+        return array;
+
+    /* we have a lua array. transform it. */
+    array = lua_newuserdata(L, sizeof(ua_array));
+    array->local_data = NULL;
+    array->local_length = -1;
+    array->type = NULL;
+    array->data = &array->local_data;
+    array->length = &array->local_length;
+    luaL_setmetatable(L, "open62541-array");
+
+    size_t len = lua_rawlen(L, index);
+    if(len == 0)
+        return array;
+
+    /* get the first entry */
+    lua_rawgeti(L, index, 1);
+    ua_data *data = ua_getdata(L, -1);
+    if(!data) {
+        lua_pop(L, 2);
+        luaL_error(L, "cannot transform to an open62541 array");
+        return NULL;
+    }
+    array->local_data = malloc(len * data->type->memSize);
+    UA_copy(data->data, array->local_data, data->type);
+    array->local_length = 1;
+    array->type = data->type;
+    lua_pop(L, 1);
+    for(size_t i = 2; i <= len; i++) {
+        lua_rawgeti(L, index, i);
+        data = ua_getdata(L, -1);
+        if(!data || data->type != array->type) {
+            lua_pop(L, 2);
+            UA_Array_delete(array->local_data, array->type, array->local_length);
+            array->local_length = -1;
+            array->local_data = NULL;
+            array->type = NULL;
+            return NULL;
+        }
+        UA_copy(data->data, array->local_data + (data->type->memSize * array->local_length), data->type);
+        array->local_length++;
+        lua_pop(L, 1);
+    }
+    lua_replace(L, index); // move the new ua_array to the inde of the lua-array we copied
+    return array;
 }
 
 /* Guid */
@@ -138,25 +196,9 @@ static UA_LocalizedText parse_localizedtext(lua_State *L, int index) {
             luaL_error(L, "The second argument is no string");
     else {
         lt.locale = UA_STRING_ALLOC(lua_tostring(L, index));
-        lt.text = UA_STRING_ALLOC(lua_tostring(L, index));
+        lt.text = UA_STRING_ALLOC(lua_tostring(L, index+1));
     }
     return lt;
-}
-
-/* Boolean */
-static void
-ua_boolean_set(lua_State *L, UA_Boolean *b, int index) {
-    if(lua_isboolean(L, index)) {
-        *b = lua_toboolean(L, index);
-        return;
-    }
-    ua_data *data = luaL_checkudata (L, index, "open62541-builtin");
-    if(!data || data->type != &UA_TYPES[UA_TYPES_BOOLEAN]) {
-        luaL_error(L, "Cannot set boolean from the given type");
-        return;
-    }
-    *b = *(UA_Boolean*)data->data;
-    return;
 }
 
 /* Variant */
@@ -337,21 +379,65 @@ int ua_newindex(lua_State *L) {
     const UA_DataType *membertype = &UA_TYPES[parent->type->members[memberindex].memberTypeIndex];
     UA_Int32 *arraylen;
     void *member = memberptr(parent->data, parent->type, memberindex, &arraylen);
-    if(membertype == &UA_TYPES[UA_TYPES_VARIANT]) {
-        ua_variant_set(L, member, 3);
-        return 0;
+    if(!arraylen && membertype == &UA_TYPES[UA_TYPES_VARIANT]) {
+        ua_data *data = ua_getdata(L, 3);
+        if(data) {
+            UA_Variant_deleteMembers(member);
+            UA_Variant_setScalarCopy(member, data->data, data->type);
+            return 0;
+        }
+        ua_array *array = ua_getarray(L, 3);
+        if(array) {
+            UA_Variant_deleteMembers(member);
+            UA_Variant_setArrayCopy(member, *array->data, *array->length, array->type);
+            return 0;
+        }
+        return luaL_error(L, "Could not convert to an open62541 type");
     }
-    if(membertype == &UA_TYPES[UA_TYPES_BOOLEAN]) {
-        ua_boolean_set(L, member, 3);
-        return 0;
+    if(!arraylen) {
+        ua_data *data = ua_getdata(L, 3);
+        if(!data)
+            return luaL_error(L, "Could not convert to an open62541 type");
+        if(data->type == &UA_TYPES[UA_TYPES_INT32]) {
+            UA_Int32 n = *(UA_Int32*)data->data;
+            switch(membertype->typeIndex + (0x8000 * !membertype->namespaceZero)) {
+            case UA_TYPES_BOOLEAN:
+                *(UA_Boolean*)member = n;
+                    return 0;
+            case UA_TYPES_SBYTE:
+            case UA_TYPES_BYTE:
+                *(UA_Byte*)member = n;
+                return 0;
+            case UA_TYPES_INT16:
+            case UA_TYPES_UINT16:
+                *(UA_Int16*)member = n;
+                return 0;
+            case UA_TYPES_INT32:
+            case UA_TYPES_UINT32:
+            case UA_TYPES_STATUSCODE:
+                *(UA_Int32*)member = n;
+                return 0;
+            case UA_TYPES_INT64:
+            case UA_TYPES_UINT64:
+            case UA_TYPES_DATETIME:
+                *(UA_Int64*)member = n;
+                return 0;
+            }
+        }
+        if(membertype != data->type)
+            return luaL_error(L, "Types don't match");
+        UA_deleteMembers(member, membertype);
+        UA_copy(data->data, member, membertype);
+    } else {
+        ua_array *array = ua_getarray(L, 3);
+        if(!array)
+            return luaL_error(L, "Could not convert to an open62541 array");
+        if(membertype != array->type)
+            return luaL_error(L, "Types don't match");
+        UA_Array_delete(*(void**)member, membertype, *arraylen);
+        UA_Array_copy(member, *array->data, membertype, *array->length);
+        *arraylen = *array->length;
     }
-    ua_data *value = ua_getdata(L, -1);
-    if(!value || membertype != value->type)
-        return luaL_error(L, "Types don't match");
-    if(arraylen)
-        return luaL_error(L, "Cannot set arrays yet");
-    UA_deleteMembers(member, membertype);
-    UA_copy(value->data, member, membertype);
     return 0;
 }
 
@@ -564,8 +650,9 @@ int ua_array_pairs(lua_State *L) {
 }
 
 void ua_populate_types(lua_State *L) {
+    lua_newtable(L);
     for(int i = 0; i < UA_TYPES_COUNT; i++) {
-        pushlower(L, UA_TYPES[i].typeName);
+        lua_pushstring(L, UA_TYPES[i].typeName);
         lua_pushlightuserdata(L, (void*)&UA_TYPES[i]);
         lua_pushcclosure(L, &ua_new_type_closure, 1);
         lua_settable(L, -3);
