@@ -294,19 +294,19 @@ ua_server_methodcallback(const UA_NodeId objectId, const UA_Variant *input,
 int ua_server_add_methodnode(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, 1, "open62541-server");
     ua_data *requestedNewNodeId = ua_getdata(L, 2);
-    if(requestedNewNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
+    if(!requestedNewNodeId || requestedNewNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
         return luaL_error(L, "1st argument (requestednewnodeid) is not of nodeid type");
     ua_data *parentNodeId = ua_getdata(L, 3);
-    if(parentNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
+    if(!parentNodeId || parentNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
         return luaL_error(L, "2nd argument (parentnodeid) is not of nodeid type");
     ua_data *referenceTypeId = ua_getdata(L, 4);
-    if(referenceTypeId->type != &UA_TYPES[UA_TYPES_NODEID])
+    if(!referenceTypeId || referenceTypeId->type != &UA_TYPES[UA_TYPES_NODEID])
         return luaL_error(L, "3th argument (referenceTypeId) is not of nodeid type");
     ua_data *browseName = ua_getdata(L, 5);
-    if(browseName->type != &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
+    if(!browseName || browseName->type != &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
         return luaL_error(L, "4th argument (browsename) is not of qualifiedname type");
     ua_data *attr = ua_getdata(L, 6);
-    if(attr->type != &UA_TYPES[UA_TYPES_METHODATTRIBUTES])
+    if(!attr || attr->type != &UA_TYPES[UA_TYPES_METHODATTRIBUTES])
         return luaL_error(L, "5th argument (methodattributes) is not of methodattributes type");
     if(!lua_isfunction(L, 7))
         return luaL_error(L, "6th argument (method) is not of function type");

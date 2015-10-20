@@ -17,32 +17,31 @@ static void addNodeId(lua_State *L, int identifier, const char *name) {
 static void addNodeIds(lua_State *L) {
     lua_newtable(L);
 
-    addNodeId(L, 0, "null");
+    addNodeId(L, 0, "Null");
 
     /* References */
-    addNodeId(L, 31, "references");
-    addNodeId(L, 32, "nonhierarchicalreferences");
-    addNodeId(L, 33, "hierarchicalreferences");
-    addNodeId(L, 35, "organizes");
-    addNodeId(L, 40, "hastypedefinition");
-    addNodeId(L, 45, "hassubtype");
-    addNodeId(L, 46, "hasproperty");
-    addNodeId(L, 47, "hascomponent");
+    addNodeId(L, 31, "References");
+    addNodeId(L, 32, "NonHierarchicalReferences");
+    addNodeId(L, 33, "HierarchicalReferences");
+    addNodeId(L, 35, "Organizes");
+    addNodeId(L, 40, "HasTypeDefinition");
+    addNodeId(L, 45, "HasSubtype");
+    addNodeId(L, 46, "HasProperty");
+    addNodeId(L, 47, "HasComponent");
         
     /* Object Types */
-    addNodeId(L, 58, "baseobjecttype");
-      addNodeId(L, 61, "foldertype");
+    addNodeId(L, 58, "BaseObjectType");
+      addNodeId(L, 61, "FolderType");
 
     /* Objects */
-    addNodeId(L, 84, "root");
-    addNodeId(L, 85, "objects");
-    addNodeId(L, 86, "types");
-      addNodeId(L, 90, "datatypes");
-      addNodeId(L, 88, "objecttypes");
-      addNodeId(L, 58, "baseobjecttype");
-      addNodeId(L, 91, "referencetypes");
-      addNodeId(L, 89, "variabletypes");
-    addNodeId(L, 87, "views");
+    addNodeId(L, 84, "Root");
+    addNodeId(L, 85, "Objects");
+    addNodeId(L, 86, "Types");
+      addNodeId(L, 90, "DataTypes");
+      addNodeId(L, 88, "ObjectTypes");
+      addNodeId(L, 91, "ReferenceTypes");
+      addNodeId(L, 89, "VariableTypes");
+    addNodeId(L, 87, "Views");
 
     lua_setfield(L, -2, "nodeids");
 }
