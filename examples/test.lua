@@ -1,6 +1,5 @@
 -- initialize the server
-ua = require("open62541")
-server = ua.Server(16663)
+server = ua.Server(16664)
 
 -- entity objecttype
 local requested_nodeid = ua.nodeids.Null
@@ -42,6 +41,16 @@ local attr = ua.types.ObjectTypeAttributes()
 attr.displayname = ua.types.LocalizedText("en_US", "AdministrationShell")
 local as_id = server:addObjectTypeNode(requested_nodeid, parent_nodeid,
                                            reference_nodeid, browsename, attr)
+-- administrationshell identifier
+local requested_nodeid = ua.nodeids.Null
+local parent_nodeid = as_id
+local reference_nodeid = ua.nodeids.HasComponent
+local browsename = ua.types.QualifiedName(1, "identifier")
+local attr = ua.types.VariableAttributes()
+attr.displayname = ua.types.LocalizedText("en_US", "Identifier")
+attr.value.value = ua.types.NodeId()
+local as_identifier_id = server:addVariableNode(requested_nodeid, parent_nodeid,
+                                                reference_nodeid, browsename, ua.nodeids.Null, attr)
 
 -- administrates referencetype
 local requested_nodeid = ua.nodeids.Null
@@ -71,6 +80,7 @@ local browsename = ua.types.QualifiedName(1, "USBVersion")
 local typeidentifier = ua.nodeids.Null
 local attr = ua.types.VariableAttributes()
 attr.displayname = ua.types.LocalizedText("en_US", "USBVersion")
+attr.value.value = ua.types.Int32()
 id = server:addVariableNode(requested_nodeid, parent_nodeid, reference_nodeid,
                             browsename, typeidentifier, attr)
 
@@ -81,6 +91,7 @@ local browsename = ua.types.QualifiedName(1, "USBConnectorType")
 local typeidentifier = ua.nodeids.Null
 local attr = ua.types.VariableAttributes()
 attr.displayname = ua.types.LocalizedText("en_US", "USBConnectorType")
+attr.value.value = ua.types.Int32()
 id = server:addVariableNode(requested_nodeid, parent_nodeid, reference_nodeid,
                             browsename, typeidentifier, attr)
 
@@ -124,8 +135,9 @@ local browsename = ua.types.QualifiedName(1, "Speed")
 local typeidentifier = ua.nodeids.Null
 local attr = ua.types.VariableAttributes()
 attr.displayname = ua.types.LocalizedText("en_US", "Speed")
-server:addVariableNode(requested_nodeid, parent_nodeid,
-                       reference_nodeid, browsename, typeidentifier, attr)
+attr.value.value = ua.types.Int32()
+id = server:addVariableNode(requested_nodeid, parent_nodeid,
+                            reference_nodeid, browsename, typeidentifier, attr)
 
 -- computer usb
 local requested_nodeid = ua.nodeids.Null
@@ -156,8 +168,8 @@ local browsename = ua.types.QualifiedName(1, "Resolution")
 local typeidentifier = ua.nodeids.Null
 local attr = ua.types.VariableAttributes()
 attr.displayname = ua.types.LocalizedText("en_US", "Resolution")
-server:addVariableNode(requested_nodeid, parent_nodeid,
-                       reference_nodeid, browsename, typeidentifier, attr)
+id = server:addVariableNode(requested_nodeid, parent_nodeid,
+                            reference_nodeid, browsename, typeidentifier, attr)
 
 -- mouse usb
 local requested_nodeid = ua.nodeids.Null
@@ -197,7 +209,7 @@ local typeidentifier = as_id
 local attr = ua.types.ObjectAttributes()
 attr.displayname = ua.types.LocalizedText("en_US", "Computer Admin Shell")
 cas_id = server:addObjectNode(requested_nodeid, parent_nodeid,
-                                 reference_nodeid, browsename, typeidentifier, attr)
+                              reference_nodeid, browsename, typeidentifier, attr)
 
 -- computer admin shell -> computer
 local source = computer_id
@@ -207,27 +219,18 @@ local isforward = false
 server:addReference(source, reftype, target, isforward)
 
 -- add method
-function test(server, objectid, arguments)
-   print("here")
+function test(objectid, ...)
+   print(objectid)
    return 1,2
 end
-local requested_nodeid = ua.nodeids.Null
-local parent_nodeid = ua.nodeids.Objects
-local reference_nodeid = ua.nodeids.HasComponent
-local browsename = ua.types.QualifiedName(1, "Test Method")
-local attr = ua.types.MethodAttributes()
+
+browsename = ua.types.QualifiedName(1, "Test Method")
+attr = ua.types.MethodAttributes()
 attr.displayname = ua.types.LocalizedText("en_US", "Test Method")
 attr.executable = true
-cas_id = server:addMethodNode(requested_nodeid, parent_nodeid,
-                              reference_nodeid, browsename, attr, test, {}, {})
+server:addMethodNode(ua.nodeids.Null, ua.nodeids.Objects,
+               ua.nodeids.HasComponent, browsename,
+               attr, test, ua.Array(ua.types.Argument, 0), ua.Array(ua.types.Argument, 0))
 
--- start the server
 server:start()
-
--- don't stop the server until somebody types 'q'
-while true do
-   input = io.read("*l")
-   if input == "q" then return end
-end
-
-server:stop()
+--server:stop()

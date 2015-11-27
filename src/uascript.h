@@ -1,22 +1,29 @@
+#ifndef UASCRIPT_H_
+#define UASCRIPT_H_
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
 
-//#define USE_LUAJIT
-
-#ifdef USE_LUAJIT
-# include "luajit-2.0/lua.h"
-# include "luajit-2.0/lauxlib.h"
-# include "luajit-2.0/lualib.h"
-# include "compat-5.2.h"
-#else
-# include "lua5.2/lua.h"
-# include "lua5.2/lauxlib.h"
-# include "lua5.2/lualib.h"
-#endif
-
 #include "open62541.h"
+#include "lua.h"
+#include "compat-5.2.h"
+
+void ua_lock_interpreter(lua_State *L);
+void ua_unlock_interpreter(lua_State *L);
+
+/* Types are a table with a single lightuserdata entry at index 1, that points
+   to the UA_TYPES entry */
+
+int ua_type_tostring(lua_State *L);
+int ua_type_instantiate(lua_State *L);
+int ua_type_indexerr(lua_State *L); // throws an error (readonly table)
+void ua_type_push_typetable(lua_State *L, const UA_DataType *type);
 
 /* UA userdata is always of the below type. The original userdata "owns" the
    memory and needs to garbage-collect it. All derived versions (i.e. created
@@ -32,23 +39,26 @@ int ua_gc(lua_State *L);
 int ua_index(lua_State *L);
 int ua_newindex(lua_State *L);
 int ua_tostring(lua_State *L);
+int ua_len(lua_State *L);
 int ua_pairs(lua_State *L);
-void ua_populate_types(lua_State *L);
 ua_data * ua_getdata(lua_State *L, int index);
+int ua_get_type(lua_State *L);
 
 /* Arrays are of a special type and have a different metatable. Arrays cannot be
    created standalone, but are always part of an enclosing type. Indexing arrays
    returns a copy of the element. */
 typedef struct {
     const UA_DataType *type;
-    UA_Int32 *length;
+    size_t *length;
     void **data;
-    /* normally, the array "points" into an ua_data userdata. but it can also
+    /* normally, arrays point to the member of ua_data value. but it can also
        carry the data itself */
-    UA_Int32 local_length;
+    size_t local_length;
     void *local_data;
 } ua_array;
 
+int ua_array_tostring(lua_State *L);
+int ua_array_new(lua_State *L);
 int ua_array_index(lua_State *L);
 int ua_array_len(lua_State *L);
 int ua_array_newindex(lua_State *L);
@@ -68,5 +78,22 @@ int ua_server_add_referencetypenode(lua_State *L);
 int ua_server_add_reference(lua_State *L);
 int ua_server_add_methodnode(lua_State *L);
 
+/* Client */
+int ua_client_new(lua_State *L);
+int ua_client_gc(lua_State *L);
+int ua_client_connect(lua_State *L);
+int ua_client_disconnect(lua_State *L);
+int ua_client_service_browse(lua_State *L);
+int ua_client_service_browsenext(lua_State *L);
+int ua_client_service_read(lua_State *L);
+int ua_client_service_write(lua_State *L);
+int ua_client_service_call(lua_State *L);
+
 /* Populate the Module */
 int luaopen_open62541(lua_State *L);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* UASCRIPT_H_ */

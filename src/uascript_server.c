@@ -1,10 +1,13 @@
+#include "uascript.h"
+#include "lualib.h"
+#include "lauxlib.h"
+
 #ifndef _WIN32
 # include <pthread.h>
 #else
 # include <windows.h>
 # include <process.h>
 #endif
-#include "lua-open62541.h"
 
 struct ua_background_server {
     UA_Boolean running;
@@ -68,13 +71,16 @@ int ua_server_start(lua_State *L) {
 
 int ua_server_stop(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, -1, "open62541-server");
+	server->running = UA_FALSE;
+#ifndef _WIN32
     if(pthread_equal(pthread_self(), server->thread))
         return luaL_error(L, "The server is not running");
-    server->running = UA_FALSE;
-#ifndef _WIN32
     pthread_join(server->thread, NULL);
     server->thread = pthread_self();
 #else
+    if(!server->thread)
+        return luaL_error(L, "The server is not running");
+	WaitForSingleObject(server->thread, INFINITE);
     server->thread = 0;
 #endif
     return 0;
@@ -227,68 +233,59 @@ int ua_server_add_referencetypenode(lua_State *L) {
 }
 
 struct callbackdata {
-    UA_Server *server;
-    UA_ByteString function_dump;
+    lua_State *L;
+    void* functionindex;
 };
 
-static int dump_write(lua_State* L, unsigned char* str, size_t len, struct luaL_Buffer *buf) {
-    luaL_addlstring(buf, str, len);
-    return 0;
-}
-
 static UA_StatusCode
-ua_server_methodcallback(const UA_NodeId objectId, const UA_Variant *input,
-                         UA_Variant *output, void *handle) {
-    lua_State *L = luaL_newstate();
-    luaL_openlibs(L);
-    luaopen_open62541(L);
-    struct callbackdata *data = handle;
-    luaL_loadbuffer(L, data->function_dump.data, data->function_dump.length, "callback function");
-
-    struct ua_background_server *server = lua_newuserdata(L, sizeof(struct ua_background_server));
-    server->running = UA_TRUE;
-    server->gc = UA_FALSE;
-    server->server = data->server;
-#ifndef _WIN32
-    server->thread = pthread_self();
-#else
-    server->thread = 0;
-#endif
-    luaL_setmetatable(L, "open62541-server");
+ua_server_methodcallback(void *methodHandle, const UA_NodeId objectId,
+                         size_t inputSize, const UA_Variant *input,
+                         size_t outputSize, UA_Variant *output) {
+    struct callbackdata *data = methodHandle;
+    lua_State *L = lua_newthread(data->L);
+    /* get the function */
+    lua_pushlightuserdata(L, data->functionindex);
+    lua_gettable(L, LUA_REGISTRYINDEX);
 
     ua_data *id = lua_newuserdata(L, sizeof(ua_data));
     id->data = UA_NodeId_new();
     UA_NodeId_copy(&objectId, id->data);
     id->type = &UA_TYPES[UA_TYPES_NODEID];
-    luaL_setmetatable(L, "open62541-builtin");
+    luaL_setmetatable(L, "open62541-data");
 
-    if(input) {
-        ua_data *i = lua_newuserdata(L, sizeof(ua_data));
-        i->data = UA_String_new();
-        UA_String_copy(input->data, i->data);
-        i->type = &UA_TYPES[UA_TYPES_STRING];
-        /* i->data = UA_Variant_new(); */
-        /* UA_Variant_copy(input, i->data); */
-        /* i->type = &UA_TYPES[UA_TYPES_VARIANT]; */
-        luaL_setmetatable(L, "open62541-builtin");
-    } else
-        lua_pushnil(L);
+    for(size_t i = 0; i < inputSize; i++) {
+        ua_data *arg = lua_newuserdata(L, sizeof(ua_data));
+        arg->data = UA_Variant_new();
+        UA_Variant_copy(&input[i], arg->data);
+        arg->type = &UA_TYPES[UA_TYPES_VARIANT];
+        luaL_setmetatable(L, "open62541-data");
+    }
 
-    int res = lua_pcall(L, 3, 2, 0); // 0 -> success
+    int res = lua_pcall(L, inputSize+1, outputSize, 0); // the first output is the statuscode
     if(res) {
-        printf("error in the callback: %s", lua_tostring(L, -1));
+        printf("error in the callback: %s\n", lua_tostring(L, -1));
         return UA_STATUSCODE_BADINTERNALERROR;
     }
-    UA_StatusCode retval = lua_tonumber(L, -2);
-    ua_data *out = ua_getdata(L, -1);
-    if(!output || !out)
-        ;
-    else if(out->type == &UA_TYPES[UA_TYPES_VARIANT])
-        UA_Variant_copy(output, out->data);
-    else
-        UA_Variant_setScalarCopy(output, out->data, out->type);
-    lua_close(L);
-    return retval;
+
+    for(size_t j = 0; j < outputSize; j++) {
+        ua_data *out = ua_getdata(L, -outputSize-1);
+        if(out) {
+            if(out->type == &UA_TYPES[UA_TYPES_VARIANT])
+                UA_Variant_copy(out->data, &output[j]);
+            else
+                UA_Variant_setScalarCopy(&output[j], out->data, out->type);
+            continue;
+        }
+        ua_array *outarray = luaL_testudata(L, -outputSize-1, "open62541-array");
+        if(outarray) {
+            UA_Variant_setArrayCopy(&output[j], *outarray->data, *outarray->length, outarray->type);
+            continue;
+        }
+        return UA_STATUSCODE_BADINTERNALERROR;
+    }
+
+    lua_pop(data->L, 1); // pop the new thread from the original state
+    return UA_STATUSCODE_GOOD;
 }
 
 int ua_server_add_methodnode(lua_State *L) {
@@ -310,27 +307,21 @@ int ua_server_add_methodnode(lua_State *L) {
         return luaL_error(L, "5th argument (methodattributes) is not of methodattributes type");
     if(!lua_isfunction(L, 7))
         return luaL_error(L, "6th argument (method) is not of function type");
-    ua_array *input = ua_getarray(L, 8);
+    ua_array *input = luaL_checkudata(L, 8, "open62541-array");
     if(!input || (input->type && input->type != &UA_TYPES[UA_TYPES_ARGUMENT]))
         return luaL_error(L, "7th argument (inputarguments) is not an array of arguments");
-    ua_array *output = ua_getarray(L, 9);
+    ua_array *output = luaL_checkudata(L, 9, "open62541-array");
     if(!output || (output->type && output->type != &UA_TYPES[UA_TYPES_ARGUMENT]))
         return luaL_error(L, "8th argument (outputarguments) is not an array of arguments");
 
-    /* dump the function */
-    luaL_Buffer buf;
-    luaL_buffinit(L, &buf);
-    lua_pushvalue(L, 7);
-    lua_dump(L, (lua_Writer)dump_write, &buf);
-    luaL_pushresult(&buf);
-    size_t dumpsize;
-    const char *dbuffer = lua_tolstring(L, -1, &dumpsize);
-
     struct callbackdata *cbdata = malloc(sizeof(struct callbackdata));
-    cbdata->server = server->server;
-    UA_ByteString_newMembers(&cbdata->function_dump, dumpsize);
-    memcpy(cbdata->function_dump.data, dbuffer, dumpsize);
 
+    /* put the function in the registry */
+    lua_pushlightuserdata(L, cbdata);
+    lua_pushvalue(L, 7);
+    lua_settable(L, LUA_REGISTRYINDEX);
+    cbdata->L = L;
+    cbdata->functionindex = (void*)cbdata;
     UA_NodeId result;
     UA_StatusCode retval = UA_Server_addMethodNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
                                                    *(UA_NodeId*)parentNodeId->data,
@@ -340,6 +331,7 @@ int ua_server_add_methodnode(lua_State *L) {
                                                    ua_server_methodcallback, cbdata,
                                                    *input->length, *input->data,
                                                    *output->length, *output->data, &result);
+
     if(retval != UA_STATUSCODE_GOOD)
         return luaL_error(L, "Statuscode is %f", retval);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));

@@ -4,6 +4,10 @@
 #include "lua.h"
 #include "lauxlib.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #if !defined(LUA_VERSION_NUM)
 /* Lua 5.0 */
 
@@ -159,3 +163,6 @@ void luaL_traceback (lua_State *L, lua_State *L1, const char *msg, int level);
 int luaL_fileresult (lua_State *L, int stat, const char *fname);
 int luaL_execresult (lua_State *L, int stat);
 
+#ifdef __cplusplus
+}
+#endif
