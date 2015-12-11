@@ -27,7 +27,7 @@ LUA_API void ua_unlock_interpreter(lua_State *L) {
 #endif
 
 
-static const struct luaL_Reg open62541 [] = {
+static const struct luaL_Reg uascript_module [] = {
     {"typeof", ua_get_type},
     {"Array", ua_array_new},
     {"Server", ua_server_new},
@@ -44,7 +44,12 @@ static void addNodeId(lua_State *L, int identifier, const char *name) {
     lua_setfield(L, -2, name);
 }
 
-int luaopen_open62541(lua_State *L) {
+static void addAttributeId(lua_State *L, int identifier, const char *name) {
+    lua_pushnumber(L, identifier);
+    lua_setfield(L, -2, name);
+}
+
+int luaopen_uascript(lua_State *L) {
     /* metatable for data types */
     luaL_newmetatable(L, "open62541-type");
     lua_pushcfunction(L, ua_type_tostring);
@@ -108,6 +113,8 @@ int luaopen_open62541(lua_State *L) {
     lua_setfield(L, -2, "addReferenceTypeNode");
     lua_pushcfunction(L, ua_server_add_reference);
     lua_setfield(L, -2, "addReference");
+    lua_pushcfunction(L, ua_server_write);
+    lua_setfield(L, -2, "write");
     lua_setfield(L, -2, "__index");
     lua_pop(L, 1);
 
@@ -134,7 +141,7 @@ int luaopen_open62541(lua_State *L) {
     lua_pop(L, 1);
 
     /* create the module */
-    luaL_newlib(L, open62541);
+    luaL_newlib(L, uascript_module);
 
     /* add the data types */
     lua_newtable(L);
@@ -143,7 +150,6 @@ int luaopen_open62541(lua_State *L) {
         lua_setfield(L, -2, UA_TYPES[i].typeName);
     }
     lua_setfield(L, -2, "types");
-
 
     /* add the nodeids */
     lua_newtable(L);
@@ -169,7 +175,33 @@ int luaopen_open62541(lua_State *L) {
       addNodeId(L, 91, "ReferenceTypes");
       addNodeId(L, 89, "VariableTypes");
     addNodeId(L, 87, "Views");
-    lua_setfield(L, -2, "nodeids");
+    lua_setfield(L, -2, "nodeIds");
+
+    /* add the attribute ids */
+    lua_newtable(L);
+    addAttributeId(L, 1, "NodeId");
+    addAttributeId(L, 2, "NodeClass");
+    addAttributeId(L, 3, "BrowseName");
+    addAttributeId(L, 4, "DisplayName");
+    addAttributeId(L, 5, "Description");
+    addAttributeId(L, 6, "WriteMask");
+    addAttributeId(L, 7, "UserWriteMask");
+    addAttributeId(L, 8, "IsAbstract");
+    addAttributeId(L, 9, "Symmetric");
+    addAttributeId(L, 10, "InverseName");
+    addAttributeId(L, 11, "ContainsNoLoops");
+    addAttributeId(L, 12, "EventNotifier");
+    addAttributeId(L, 13, "Value");
+    addAttributeId(L, 14, "DataType");
+    addAttributeId(L, 15, "ValueRank");
+    addAttributeId(L, 16, "ArrayDimensions");
+    addAttributeId(L, 17, "AccessLevel");
+    addAttributeId(L, 18, "UserAccessLevel");
+    addAttributeId(L, 19, "MinimumSamplingInterval");
+    addAttributeId(L, 20, "Historizing");
+    addAttributeId(L, 21, "Executable");
+    addAttributeId(L, 22, "UserExecutable");
+    lua_setfield(L, -2, "attributeIds");
 
     return 1;
 }

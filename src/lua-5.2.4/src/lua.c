@@ -395,34 +395,45 @@ static char **lua_rl_complete(const char *text, int start, int end)
 
   /* Add all matches against keywords if there is no dot/colon. */
   if (dot == 0)
-    for (i = 0; (s = lua_rl_keywords[i]) != NULL; i++)
-      if (!strncmp(s, text, n) && lua_rl_dmadd(&ml, NULL, 0, s, ' '))
-	goto error;
+      for (i = 0; (s = lua_rl_keywords[i]) != NULL; i++)
+          if (!strncmp(s, text, n) && lua_rl_dmadd(&ml, NULL, 0, s, ' '))
+              goto error;
+
+  /* /\* Add all string matches from pairs *\/ */
+  /* if (lua_istable(L, -1)) { */
+  /*     lua_getglobal(L, "pairs"); */
+  /*     lua_insert(L, -2); */
+  /*     lua_pcall(L, 1, 3, 0); */
+  /*     for() { */
+
+  /*     } */
+  /* } */
 
   /* Add all valid matches from all tables/metatables. */
   loop = 0;  /* Avoid infinite metatable loops. */
   lua_pushglobaltable(L);
   lua_insert(L, -2);
   do {
-    if (lua_istable(L, -1) &&
-	(loop == 0 || !lua_rawequal(L, -1, -2)))
-      for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1))
-	if (lua_type(L, -2) == LUA_TSTRING) {
-	  s = lua_tostring(L, -2);
-	  /* Only match names starting with '_' if explicitly requested. */
-	  if (!strncmp(s, text+dot, n-dot) && valididentifier(s) &&
-	      (*s != '_' || text[dot] == '_')) {
-	    int suf = ' ';  /* Default suffix is a space. */
-	    switch (lua_type(L, -1)) {
-	    case LUA_TTABLE:	suf = '.'; break;  /* No way to guess ':'. */
-	    case LUA_TFUNCTION:	suf = '('; break;
-	    case LUA_TUSERDATA:
-	      if (lua_getmetatable(L, -1)) { lua_pop(L, 1); suf = ':'; }
-	      break;
-	    }
-	    if (lua_rl_dmadd(&ml, text, dot, s, suf)) goto error;
-	  }
-	}
+      if (lua_istable(L, -1) && (loop == 0 || !lua_rawequal(L, -1, -2))) {
+          for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) {
+              if (lua_type(L, -2) == LUA_TSTRING) {
+                  s = lua_tostring(L, -2);
+                  /* Only match names starting with '_' if explicitly requested. */
+                  if (!strncmp(s, text+dot, n-dot) && valididentifier(s) &&
+                      (*s != '_' || text[dot] == '_')) {
+                      int suf = ' ';  /* Default suffix is a space. */
+                      switch (lua_type(L, -1)) {
+                      case LUA_TTABLE:	suf = '.'; break;  /* No way to guess ':'. */
+                      case LUA_TFUNCTION:	suf = '('; break;
+                      case LUA_TUSERDATA:
+                          if (lua_getmetatable(L, -1)) { lua_pop(L, 1); suf = ':'; }
+                          break;
+                      }
+                      if (lua_rl_dmadd(&ml, text, dot, s, suf)) goto error;
+                  }
+              }
+          }
+      }
   } while (++loop < 20 && lua_rl_getmetaindex(L));
   lua_pop(L, 1);
 
@@ -717,7 +728,7 @@ static int pmain (lua_State *L) {
   /* open62541 lib */
   lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);
   lua_pushstring(L, "ua");
-  luaopen_open62541(L);
+  luaopen_uascript(L);
   lua_settable(L, -3);
   lua_pop(L, 1);
   /* end open62541 lib */

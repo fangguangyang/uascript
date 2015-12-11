@@ -1,6 +1,6 @@
 /* THIS IS A SINGLE-FILE DISTRIBUTION CONCATENATED FROM THE OPEN62541 SOURCES 
  * visit http://open62541.org/ for information about this software
- * Git-Revision: v0.1.0-RC4-831-g4634aa1
+ * Git-Revision: v0.1.0-RC4-871-gaeb0190-dirty
  */
  
  /*
@@ -430,10 +430,13 @@ typedef int32_t UA_Int32;
 #define UA_INT32_MAX 2147483647
 #define UA_INT32_MIN (-2147483648)
 
-/** UInt32: An integer value between 0 and 429 4967 295 */
+/** UInt32: An integer value between 0 and 4 294 967 295 */
 typedef uint32_t UA_UInt32;
 #define UA_UINT32_MAX 4294967295
 #define UA_UINT32_MIN 0
+
+/* do not use for cryptographic entropy */
+UA_EXPORT UA_UInt32 UA_UInt32_random(void);
 
 /** Int64: An integer value between -10 223 372 036 854 775 808 and 9 223 372 036 854 775 807 */
 typedef int64_t UA_Int64;
@@ -455,8 +458,8 @@ typedef double UA_Double;
 /* String: A sequence of Unicode characters */
 /********************************************/
 typedef struct {
-    size_t length; ///< The length of the string
-    UA_Byte *data; ///< The string's content (not null-terminated)
+    size_t length; // The length of the string
+    UA_Byte *data; // The string's content (not null-terminated)
 } UA_String;
 
 UA_EXPORT extern const UA_String UA_STRING_NULL;
@@ -509,7 +512,8 @@ typedef struct {
 
 UA_Boolean UA_EXPORT UA_Guid_equal(const UA_Guid *g1, const UA_Guid *g2);
 
-UA_Guid UA_EXPORT UA_Guid_random(UA_UInt32 *seed);
+/* do not use for cryptographic entropy */
+UA_Guid UA_EXPORT UA_Guid_random(void);
 
 /************************************/
 /* ByteString: A sequence of octets */
@@ -558,14 +562,14 @@ typedef struct {
     } identifier;
 } UA_NodeId;
 
+UA_EXPORT extern const UA_NodeId UA_NODEID_NULL;
+
 static UA_INLINE UA_Boolean UA_NodeId_isNull(const UA_NodeId *p) {
     return (p->namespaceIndex == 0 && p->identifierType == UA_NODEIDTYPE_NUMERIC &&
             p->identifier.numeric == 0);
 }
 
 UA_Boolean UA_EXPORT UA_NodeId_equal(const UA_NodeId *n1, const UA_NodeId *n2);
-
-UA_EXPORT extern const UA_NodeId UA_NODEID_NULL;
 
 static UA_INLINE UA_NodeId UA_NODEID_NUMERIC(UA_UInt16 nsIndex, UA_Int32 identifier) {
     UA_NodeId id; id.namespaceIndex = nsIndex; id.identifierType = UA_NODEIDTYPE_NUMERIC;
@@ -628,8 +632,8 @@ static UA_INLINE UA_ExpandedNodeId UA_EXPANDEDNODEID_BYTESTRING_ALLOC(UA_UInt16 
 /* QualifiedName: A name qualified by a namespace */
 /**************************************************/
 typedef struct {
-    UA_UInt16 namespaceIndex; ///< The namespace index
-    UA_String name; ///< The actual name
+    UA_UInt16 namespaceIndex;
+    UA_String name;
 } UA_QualifiedName;
 
 static UA_INLINE UA_QualifiedName UA_QUALIFIEDNAME(UA_UInt16 nsIndex, char *chars) {
@@ -642,8 +646,8 @@ static UA_INLINE UA_QualifiedName UA_QUALIFIEDNAME_ALLOC(UA_UInt16 nsIndex, cons
 /* LocalizedText: Human readable text with an optional locale identifier */
 /*************************************************************************/
 typedef struct {
-    UA_String locale; ///< The locale (e.g. "en-US")
-    UA_String text; ///< The actual text
+    UA_String locale;
+    UA_String text;
 } UA_LocalizedText;
 
 static UA_INLINE UA_LocalizedText UA_LOCALIZEDTEXT(char *locale, char *text) {
@@ -685,29 +689,23 @@ typedef struct {
 /*********************************************/
 /* Variant: Stores (arrays of) any data type */
 /*********************************************/
- /* Variants either they provide a pointer to the data in memory, or functions
-    from which the data can be accessed. Variants are replaced together with
-    the data they store (exception: use a data source).
-
-    Variant semantics:
+ /* Variant semantics:
     - arrayLength == 0 && data == NULL: no existing data
     - arrayLength == 0 && data == 0x01: array of length 0
     - arrayLength == 0 && data > 0x01: scalar value
     - arrayLength > 0: array of the given length
  */
 typedef struct {
-    const UA_DataType *type; ///< The nodeid of the datatype
+    const UA_DataType *type; // The data type description
     enum {
-        UA_VARIANT_DATA, ///< The data is "owned" by this variant (copied and deleted together)
-        UA_VARIANT_DATA_NODELETE, /**< The data is "borrowed" by the variant and shall not be
-                                       deleted at the end of this variant's lifecycle. It is not
-                                       possible to overwrite borrowed data due to concurrent access.
-                                       Use a custom datasource with a mutex. */
-    } storageType; ///< Shall the data be deleted together with the variant
-    size_t arrayLength;  ///< the number of elements in the data-pointer
-    void *data; ///< points to the scalar or array data
-    size_t arrayDimensionsSize; ///< the number of dimensions the data-array has
-    UA_UInt32 *arrayDimensions; ///< the length of each dimension of the data-array
+        UA_VARIANT_DATA,          /* The data has the same lifecycle as the variant */
+        UA_VARIANT_DATA_NODELETE, /* The data is "borrowed" by the variant and shall not be
+                                     deleted at the end of the variant's lifecycle. */
+    } storageType;
+    size_t arrayLength;  // The number of elements in the data array
+    void *data; // Points to the scalar or array data
+    size_t arrayDimensionsSize; // The number of dimensions the data-array has
+    UA_UInt32 *arrayDimensions; // The length of each dimension of the data-array
 } UA_Variant;
 
 /**
@@ -764,11 +762,11 @@ UA_Variant_setArray(UA_Variant *v, void * UA_RESTRICT array, size_t arraySize, c
 UA_StatusCode UA_EXPORT
 UA_Variant_setArrayCopy(UA_Variant *v, const void *array, size_t arraySize, const UA_DataType *type);
 
-/* NumericRanges are used select a subset in a (multidimensional) variant array.
- * NumericRange has no official type structure in the standard. On the wire, it
- * only exists as an encoded string, such as "1:2,0:3,5". The colon separates
- * min/max index and the comma separates dimensions. A single value indicates a
- * range with a single element (min==max). */
+/* NumericRanges are used to indicate subsets of a (multidimensional) variant
+ * array. NumericRange has no official type structure in the standard. On the
+ * wire, it only exists as an encoded string, such as "1:2,0:3,5". The colon
+ * separates min/max index and the comma separates dimensions. A single value
+ * indicates a range with a single element (min==max). */
 typedef struct {
     size_t dimensionsSize;
     struct UA_NumericRangeDimension {
@@ -1020,7 +1018,6 @@ typedef enum {
  * initialized for every thread in the server/client.
  */
 UA_EXPORT void UA_random_seed(UA_UInt64 seed);
-UA_EXPORT UA_UInt32 UA_random(void);
 
 #ifdef __cplusplus
 } // extern "C"
@@ -1033,7 +1030,7 @@ UA_EXPORT UA_UInt32 UA_random(void);
  * /home/jpfr/software/open62541/build/src_generated/ua_nodeids.hgen -- do not modify
  **********************************************************
  * Generated from /home/jpfr/software/open62541/tools/schema/NodeIds.csv with script /home/jpfr/software/open62541/tools/generate_nodeids.py
- * on host virtualbox by user jpfr at 2015-11-15 03:40:12
+ * on host virtualbox by user jpfr at 2015-12-10 12:58:59
  **********************************************************/
  
 
@@ -1738,7 +1735,7 @@ UA_EXPORT UA_UInt32 UA_random(void);
 * @brief Autogenerated data types
 *
 * Generated from Opc.Ua.Types.bsd with script /home/jpfr/software/open62541/tools/generate_datatypes.py
-* on host virtualbox by user jpfr at 2015-11-15 03:44:55
+* on host virtualbox by user jpfr at 2015-12-11 02:09:42
 */
 
 
@@ -1759,7 +1756,7 @@ extern "C" {
 * @{
 */
 
-#define UA_TYPES_COUNT 152
+#define UA_TYPES_COUNT 154
 
 extern UA_EXPORT const UA_DataType *UA_TYPES;
 
@@ -3710,10 +3707,33 @@ static UA_INLINE UA_StatusCode UA_PublishResponse_copy(const UA_PublishResponse 
 
 typedef struct {
     UA_RequestHeader requestHeader;
+    UA_UInt32 subscriptionId;
+    UA_UInt32 retransmitSequenceNumber;
+} UA_RepublishRequest;
+#define UA_TYPES_REPUBLISHREQUEST 146
+static UA_INLINE void UA_RepublishRequest_init(UA_RepublishRequest *p) { memset(p, 0, sizeof(UA_RepublishRequest)); }
+static UA_INLINE void UA_RepublishRequest_delete(UA_RepublishRequest *p) { UA_delete(p, &UA_TYPES[UA_TYPES_REPUBLISHREQUEST]); }
+static UA_INLINE void UA_RepublishRequest_deleteMembers(UA_RepublishRequest *p) { UA_deleteMembers(p, &UA_TYPES[UA_TYPES_REPUBLISHREQUEST]); }
+static UA_INLINE UA_RepublishRequest * UA_RepublishRequest_new(void) { return (UA_RepublishRequest*) UA_new(&UA_TYPES[UA_TYPES_REPUBLISHREQUEST]); }
+static UA_INLINE UA_StatusCode UA_RepublishRequest_copy(const UA_RepublishRequest *src, UA_RepublishRequest *dst) { return UA_copy(src, dst, &UA_TYPES[UA_TYPES_REPUBLISHREQUEST]); }
+
+typedef struct {
+    UA_ResponseHeader responseHeader;
+    UA_NotificationMessage notificationMessage;
+} UA_RepublishResponse;
+#define UA_TYPES_REPUBLISHRESPONSE 147
+static UA_INLINE void UA_RepublishResponse_init(UA_RepublishResponse *p) { memset(p, 0, sizeof(UA_RepublishResponse)); }
+static UA_INLINE void UA_RepublishResponse_delete(UA_RepublishResponse *p) { UA_delete(p, &UA_TYPES[UA_TYPES_REPUBLISHRESPONSE]); }
+static UA_INLINE void UA_RepublishResponse_deleteMembers(UA_RepublishResponse *p) { UA_deleteMembers(p, &UA_TYPES[UA_TYPES_REPUBLISHRESPONSE]); }
+static UA_INLINE UA_RepublishResponse * UA_RepublishResponse_new(void) { return (UA_RepublishResponse*) UA_new(&UA_TYPES[UA_TYPES_REPUBLISHRESPONSE]); }
+static UA_INLINE UA_StatusCode UA_RepublishResponse_copy(const UA_RepublishResponse *src, UA_RepublishResponse *dst) { return UA_copy(src, dst, &UA_TYPES[UA_TYPES_REPUBLISHRESPONSE]); }
+
+typedef struct {
+    UA_RequestHeader requestHeader;
     size_t subscriptionIdsSize;
     UA_UInt32 *subscriptionIds;
 } UA_DeleteSubscriptionsRequest;
-#define UA_TYPES_DELETESUBSCRIPTIONSREQUEST 146
+#define UA_TYPES_DELETESUBSCRIPTIONSREQUEST 148
 static UA_INLINE void UA_DeleteSubscriptionsRequest_init(UA_DeleteSubscriptionsRequest *p) { memset(p, 0, sizeof(UA_DeleteSubscriptionsRequest)); }
 static UA_INLINE void UA_DeleteSubscriptionsRequest_delete(UA_DeleteSubscriptionsRequest *p) { UA_delete(p, &UA_TYPES[UA_TYPES_DELETESUBSCRIPTIONSREQUEST]); }
 static UA_INLINE void UA_DeleteSubscriptionsRequest_deleteMembers(UA_DeleteSubscriptionsRequest *p) { UA_deleteMembers(p, &UA_TYPES[UA_TYPES_DELETESUBSCRIPTIONSREQUEST]); }
@@ -3727,7 +3747,7 @@ typedef struct {
     size_t diagnosticInfosSize;
     UA_DiagnosticInfo *diagnosticInfos;
 } UA_DeleteSubscriptionsResponse;
-#define UA_TYPES_DELETESUBSCRIPTIONSRESPONSE 147
+#define UA_TYPES_DELETESUBSCRIPTIONSRESPONSE 149
 static UA_INLINE void UA_DeleteSubscriptionsResponse_init(UA_DeleteSubscriptionsResponse *p) { memset(p, 0, sizeof(UA_DeleteSubscriptionsResponse)); }
 static UA_INLINE void UA_DeleteSubscriptionsResponse_delete(UA_DeleteSubscriptionsResponse *p) { UA_delete(p, &UA_TYPES[UA_TYPES_DELETESUBSCRIPTIONSRESPONSE]); }
 static UA_INLINE void UA_DeleteSubscriptionsResponse_deleteMembers(UA_DeleteSubscriptionsResponse *p) { UA_deleteMembers(p, &UA_TYPES[UA_TYPES_DELETESUBSCRIPTIONSRESPONSE]); }
@@ -3742,7 +3762,7 @@ typedef struct {
     UA_String buildNumber;
     UA_DateTime buildDate;
 } UA_BuildInfo;
-#define UA_TYPES_BUILDINFO 148
+#define UA_TYPES_BUILDINFO 150
 static UA_INLINE void UA_BuildInfo_init(UA_BuildInfo *p) { memset(p, 0, sizeof(UA_BuildInfo)); }
 static UA_INLINE void UA_BuildInfo_delete(UA_BuildInfo *p) { UA_delete(p, &UA_TYPES[UA_TYPES_BUILDINFO]); }
 static UA_INLINE void UA_BuildInfo_deleteMembers(UA_BuildInfo *p) { UA_deleteMembers(p, &UA_TYPES[UA_TYPES_BUILDINFO]); }
@@ -3759,7 +3779,7 @@ typedef enum {
     UA_SERVERSTATE_COMMUNICATIONFAULT = 6,
     UA_SERVERSTATE_UNKNOWN = 7
 } UA_ServerState;
-#define UA_TYPES_SERVERSTATE 149
+#define UA_TYPES_SERVERSTATE 151
 static UA_INLINE void UA_ServerState_init(UA_ServerState *p) { memset(p, 0, sizeof(UA_ServerState)); }
 static UA_INLINE void UA_ServerState_delete(UA_ServerState *p) { UA_delete(p, &UA_TYPES[UA_TYPES_SERVERSTATE]); }
 static UA_INLINE void UA_ServerState_deleteMembers(UA_ServerState *p) {  }
@@ -3774,7 +3794,7 @@ typedef struct {
     UA_UInt32 secondsTillShutdown;
     UA_LocalizedText shutdownReason;
 } UA_ServerStatusDataType;
-#define UA_TYPES_SERVERSTATUSDATATYPE 150
+#define UA_TYPES_SERVERSTATUSDATATYPE 152
 static UA_INLINE void UA_ServerStatusDataType_init(UA_ServerStatusDataType *p) { memset(p, 0, sizeof(UA_ServerStatusDataType)); }
 static UA_INLINE void UA_ServerStatusDataType_delete(UA_ServerStatusDataType *p) { UA_delete(p, &UA_TYPES[UA_TYPES_SERVERSTATUSDATATYPE]); }
 static UA_INLINE void UA_ServerStatusDataType_deleteMembers(UA_ServerStatusDataType *p) { UA_deleteMembers(p, &UA_TYPES[UA_TYPES_SERVERSTATUSDATATYPE]); }
@@ -3787,7 +3807,7 @@ typedef struct {
     size_t diagnosticInfosSize;
     UA_DiagnosticInfo *diagnosticInfos;
 } UA_DataChangeNotification;
-#define UA_TYPES_DATACHANGENOTIFICATION 151
+#define UA_TYPES_DATACHANGENOTIFICATION 153
 static UA_INLINE void UA_DataChangeNotification_init(UA_DataChangeNotification *p) { memset(p, 0, sizeof(UA_DataChangeNotification)); }
 static UA_INLINE void UA_DataChangeNotification_delete(UA_DataChangeNotification *p) { UA_delete(p, &UA_TYPES[UA_TYPES_DATACHANGENOTIFICATION]); }
 static UA_INLINE void UA_DataChangeNotification_deleteMembers(UA_DataChangeNotification *p) { UA_deleteMembers(p, &UA_TYPES[UA_TYPES_DATACHANGENOTIFICATION]); }
@@ -3954,11 +3974,27 @@ void UA_EXPORT UA_Connection_deleteMembers(UA_Connection *connection);
 void UA_EXPORT UA_Connection_detachSecureChannel(UA_Connection *connection);
 void UA_EXPORT UA_Connection_attachSecureChannel(UA_Connection *connection, UA_SecureChannel *channel);
 
-/** Returns a job that contains either a message-bytestring managed by the network layer or a
-    message-bytestring that was newly allocated (or a nothing-job). Half-received messages are
-    attached to the connection. The next completion tries to create a complete message with the next
-    buffer the connection receives. */
-UA_Job UA_EXPORT UA_Connection_completeMessages(UA_Connection *connection, UA_ByteString received);
+/**
+ * The network layer may receive chopped up messages since TCP is a streaming
+ * protocol. Furthermore, the networklayer may operate on ringbuffers or
+ * statically assigned memory.
+ *
+ * If an entire message is received, it is forwarded directly. But the memory
+ * needs to be freed with the networklayer-specific mechanism. If a half message
+ * is received, we copy it into a local buffer. Then, the stack-specific free
+ * needs to be used.
+ *
+ * @param connection The connection
+ * @param message The received message. The content may be overwritten when a
+ *        previsouly received buffer is completed.
+ * @param realloced The Boolean value is set to true if the outgoing message has
+ *        been reallocated from the network layer.
+ * @return Returns UA_STATUSCODE_GOOD or an error code. When an error occurs, the ingoing message
+ *         and the current buffer in the connection are freed.
+ */
+UA_StatusCode UA_EXPORT
+UA_Connection_completeMessages(UA_Connection *connection, UA_ByteString * UA_RESTRICT message,
+                               UA_Boolean * UA_RESTRICT realloced);
 
 #ifdef __cplusplus
 } // extern "C"
@@ -5340,7 +5376,8 @@ void UA_EXPORT UA_Client_Subscriptions_manuallySendPublishRequest(UA_Client *cli
 UA_StatusCode UA_EXPORT
 UA_Client_Subscriptions_addMonitoredItem(UA_Client *client, UA_UInt32 subscriptionId,
                                          UA_NodeId nodeId, UA_UInt32 attributeID,
-                                         void *handlingFunction, UA_UInt32 *newMonitoredItemId);
+                                         void *handlingFunction, void *handlingContext,
+                                         UA_UInt32 *newMonitoredItemId);
 
 UA_StatusCode UA_EXPORT
 UA_Client_Subscriptions_removeMonitoredItem(UA_Client *client, UA_UInt32 subscriptionId,

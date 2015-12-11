@@ -115,6 +115,35 @@ static void *ua_type_parse(lua_State *L, const UA_DataType *type, int index) {
         return parse_qualifiedname(L, index);
     case UA_TYPES_LOCALIZEDTEXT:
         return parse_localizedtext(L, index);
+    case UA_TYPES_SBYTE:
+    case UA_TYPES_BYTE:
+    case UA_TYPES_INT16:
+    case UA_TYPES_UINT16:
+    case UA_TYPES_INT32:
+    case UA_TYPES_UINT32:
+    case UA_TYPES_INT64:
+    case UA_TYPES_UINT64: {
+        if(!lua_isnumber(L, index))
+            luaL_error(L, "Argument is not a number");
+        lua_Number n = lua_tonumber(L, index);
+        if(type->memSize == 1) {
+            UA_Byte *byte = UA_Byte_new();
+            *byte = (UA_Byte)n;
+            return byte;
+        } else if(type->memSize == 2) {
+            UA_UInt16 *i16 = UA_UInt16_new();
+            *i16 = (UA_UInt16)n;
+            return i16;
+        } else if(type->memSize == 4) {
+            UA_UInt32 *i32 = UA_UInt32_new();
+            *i32 = (UA_UInt32)n;
+            return i32;
+        } else {
+            UA_UInt64 *i64 = UA_UInt64_new();
+            *i64 = (UA_UInt64)n;
+            return i64;
+        }
+    }
     }
     luaL_error(L, "Cannot parse the arguments for the data type");
     return NULL;
@@ -682,6 +711,12 @@ ua_tostring_builtin(lua_State *L, const UA_DataType *type, void *data, size_t le
         lua_pushstring(L, out);
         return 1;
     }
+    case UA_TYPES_DATETIME: {
+        UA_String str = UA_DateTime_toString(*(UA_DateTime*)data);
+        lua_pushlstring(L, str.data, str.length);
+        UA_String_deleteMembers(&str);
+        return 1;
+    }
     case UA_TYPES_STRING:
     case UA_TYPES_BYTESTRING:
     case UA_TYPES_XMLELEMENT: {
@@ -789,8 +824,9 @@ int ua_array_index(lua_State *L) {
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
     data->type = array->type;
     data->data = UA_new(array->type);
-	uintptr_t ptr = *array->data;
-    UA_copy(ptr + (index * array->type->memSize), data->data, array->type);
+	uintptr_t ptr = (uintptr_t)*array->data;
+    ptr += index * array->type->memSize;
+    UA_copy((void*)ptr, data->data, array->type);
     luaL_setmetatable(L, "open62541-data");
     return 1;
 }
@@ -833,8 +869,9 @@ int ua_array_newindex(lua_State *L) {
         else
             *array->data = realloc(*array->data, newsize * array->type->memSize);
         *array->length = newsize;
-		uintptr_t ptr = *array->data;
-        UA_copy(data->data, ptr + (((newsize-1) * array->type->memSize)), array->type);
+		uintptr_t ptr = (uintptr_t)*array->data;
+        ptr += (newsize-1) * array->type->memSize;
+        UA_copy(data->data, (void*)ptr, array->type);
         return 0;
     }
 
@@ -875,7 +912,8 @@ ua_array_iterate(lua_State *L) {
     data->type = array->type;
     data->data = UA_new(array->type);
 	uintptr_t ptr = *array->data;
-    UA_copy(ptr + (index * array->type->memSize), data->data, array->type);
+    ptr += index * array->type->memSize;
+    UA_copy((void*)ptr, data->data, array->type);
     luaL_setmetatable(L, "open62541-data");
     return 2;
 }

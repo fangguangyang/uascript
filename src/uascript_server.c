@@ -378,3 +378,39 @@ int ua_server_add_reference(lua_State *L) {
     luaL_setmetatable(L, "open62541-data");
     return 1;
 }
+
+int ua_server_write(lua_State *L) {
+    struct ua_background_server *server = luaL_checkudata (L, 1, "open62541-server");
+    if(!server)
+        return luaL_error(L, "function must be called on a server");
+
+    ua_data *sourceId = ua_getdata(L, 2);
+    if(!sourceId || sourceId->type != &UA_TYPES[UA_TYPES_NODEID])
+        return luaL_error(L, "1st argument (sourceid) is not of nodeid type");
+
+    if(!lua_isnumber(L, 3))
+        return luaL_error(L, "2nd argument (attributeid) is not a number");
+    lua_Number attrId = lua_tonumber(L, 3);
+
+    ua_data *value = ua_getdata(L, 4);
+    if(!value)
+        return luaL_error(L, "4th argument cannot be converted to ua data");
+
+    UA_StatusCode retval;
+    if(attrId != UA_ATTRIBUTEID_VALUE) {
+        retval = __UA_Server_writeAttribute(server->server, *(UA_NodeId*)sourceId->data,
+                                            (UA_AttributeId)attrId, value->type, value->data);
+    } else {
+        UA_Variant v;
+        UA_Variant_init(&v);
+        UA_Variant_setScalarCopy(&v, value->data, value->type);
+        retval = __UA_Server_writeAttribute(server->server, *(UA_NodeId*)sourceId->data,
+                                            (UA_AttributeId)attrId, &UA_TYPES[UA_TYPES_VARIANT], &v);
+    }
+    UA_WriteValue wv;
+    UA_WriteValue_init(&wv);
+    UA_Variant_setScalar(&wv.value.value, value->data, value->type);
+
+    lua_pushnumber(L, retval);
+    return 1;
+}

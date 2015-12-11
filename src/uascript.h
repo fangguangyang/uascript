@@ -12,7 +12,7 @@ extern "C" {
 
 #include "open62541.h"
 #include "lua.h"
-#include "compat-5.2.h"
+//#include "compat-5.2.h"
 
 void ua_lock_interpreter(lua_State *L);
 void ua_unlock_interpreter(lua_State *L);
@@ -77,6 +77,7 @@ int ua_server_add_objecttypenode(lua_State *L);
 int ua_server_add_referencetypenode(lua_State *L);
 int ua_server_add_reference(lua_State *L);
 int ua_server_add_methodnode(lua_State *L);
+int ua_server_write(lua_State *L);
 
 /* Client */
 int ua_client_new(lua_State *L);
@@ -90,7 +91,7 @@ int ua_client_service_write(lua_State *L);
 int ua_client_service_call(lua_State *L);
 
 /* Populate the Module */
-int luaopen_open62541(lua_State *L);
+int luaopen_uascript(lua_State *L);
 
 #ifdef __cplusplus
 }
