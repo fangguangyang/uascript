@@ -113,6 +113,8 @@ int luaopen_uascript(lua_State *L) {
     lua_setfield(L, -2, "addReferenceTypeNode");
     lua_pushcfunction(L, ua_server_add_reference);
     lua_setfield(L, -2, "addReference");
+    lua_pushcfunction(L, ua_server_read);
+    lua_setfield(L, -2, "read");
     lua_pushcfunction(L, ua_server_write);
     lua_setfield(L, -2, "write");
     lua_setfield(L, -2, "__index");

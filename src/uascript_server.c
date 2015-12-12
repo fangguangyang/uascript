@@ -414,3 +414,97 @@ int ua_server_write(lua_State *L) {
     lua_pushnumber(L, retval);
     return 1;
 }
+
+int ua_server_read(lua_State *L) {
+    struct ua_background_server *server = luaL_checkudata (L, 1, "open62541-server");
+    if(!server)
+        return luaL_error(L, "function must be called on a server");
+
+    ua_data *sourceId = ua_getdata(L, 2);
+    if(!sourceId || sourceId->type != &UA_TYPES[UA_TYPES_NODEID])
+        return luaL_error(L, "1st argument (sourceid) is not of nodeid type");
+
+    if(!lua_isnumber(L, 3))
+        return luaL_error(L, "2nd argument (attributeid) is not a number");
+    lua_Number attrId = lua_tonumber(L, 3);
+
+    const UA_DataType *type;
+    switch((int)attrId) {
+    case UA_ATTRIBUTEID_NODEID:
+        type = &UA_TYPES[UA_TYPES_NODEID];
+        break;
+    case UA_ATTRIBUTEID_NODECLASS:
+        type = &UA_TYPES[UA_TYPES_NODECLASS];
+        break;
+    case UA_ATTRIBUTEID_BROWSENAME:
+        type = &UA_TYPES[UA_TYPES_QUALIFIEDNAME];
+        break;
+    case UA_ATTRIBUTEID_DISPLAYNAME:
+        type = &UA_TYPES[UA_TYPES_LOCALIZEDTEXT];
+        break;
+    case UA_ATTRIBUTEID_DESCRIPTION:
+        type = &UA_TYPES[UA_TYPES_LOCALIZEDTEXT];
+        break;
+    case UA_ATTRIBUTEID_WRITEMASK:
+        type = &UA_TYPES[UA_TYPES_UINT32];
+        break;
+    case UA_ATTRIBUTEID_USERWRITEMASK:
+        type = &UA_TYPES[UA_TYPES_UINT32];
+        break;
+    case UA_ATTRIBUTEID_ISABSTRACT:
+        type = &UA_TYPES[UA_TYPES_BOOLEAN];
+        break;
+    case UA_ATTRIBUTEID_SYMMETRIC:
+        type = &UA_TYPES[UA_TYPES_BOOLEAN];
+        break;
+    case UA_ATTRIBUTEID_INVERSENAME:
+        type = &UA_TYPES[UA_TYPES_LOCALIZEDTEXT];
+        break;
+    case UA_ATTRIBUTEID_CONTAINSNOLOOPS:
+        type = &UA_TYPES[UA_TYPES_BOOLEAN];
+        break;
+    case UA_ATTRIBUTEID_EVENTNOTIFIER:
+        type = &UA_TYPES[UA_TYPES_BYTE];
+        break;
+    case UA_ATTRIBUTEID_VALUE:
+        type = &UA_TYPES[UA_TYPES_VARIANT];
+        break;
+    case UA_ATTRIBUTEID_DATATYPE:
+        type = &UA_TYPES[UA_TYPES_NODEID];
+        break;
+    case UA_ATTRIBUTEID_VALUERANK:
+        type = &UA_TYPES[UA_TYPES_INT32];
+        break;
+    case UA_ATTRIBUTEID_ARRAYDIMENSIONS:
+        return luaL_error(L, "Returning arrays is not supported");
+    case UA_ATTRIBUTEID_ACCESSLEVEL:
+        type = &UA_TYPES[UA_TYPES_UINT32];
+        break;
+    case UA_ATTRIBUTEID_USERACCESSLEVEL:
+        type = &UA_TYPES[UA_TYPES_UINT32];
+        break;
+    case UA_ATTRIBUTEID_MINIMUMSAMPLINGINTERVAL:
+        type = &UA_TYPES[UA_TYPES_DOUBLE];
+        break;
+    case UA_ATTRIBUTEID_HISTORIZING:
+    case UA_ATTRIBUTEID_EXECUTABLE:
+    case UA_ATTRIBUTEID_USEREXECUTABLE:
+        type = &UA_TYPES[UA_TYPES_BOOLEAN];
+        break;
+    default:
+        return luaL_error(L, "Unknown attribute");
+    }
+    void *v = UA_new(type);
+    UA_StatusCode retval = __UA_Server_readAttribute(server->server, sourceId->data, attrId, v);
+    if(retval != UA_STATUSCODE_GOOD) {
+        UA_delete(v, type);
+        lua_pushnil(L);
+        lua_pushinteger(L, retval);
+        return 2;
+    }
+    ua_data *data = lua_newuserdata(L, sizeof(ua_data));
+    data->type = type;
+    data->data = v;
+    luaL_setmetatable(L, "open62541-data");
+    return 1;
+}

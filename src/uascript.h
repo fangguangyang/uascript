@@ -78,6 +78,7 @@ int ua_server_add_referencetypenode(lua_State *L);
 int ua_server_add_reference(lua_State *L);
 int ua_server_add_methodnode(lua_State *L);
 int ua_server_write(lua_State *L);
+int ua_server_read(lua_State *L);
 
 /* Client */
 int ua_client_new(lua_State *L);

@@ -97,9 +97,31 @@ static UA_LocalizedText* parse_localizedtext(lua_State *L, int index) {
     return lt;
 }
 
-static void *ua_type_parse(lua_State *L, const UA_DataType *type, int index) {
-    if(lua_isnil(L, index))
+static UA_Variant* parse_variant(lua_State *L, int index) {
+    ua_data *data = ua_getdata(L, index);
+    if(data) {
+        UA_Variant *v = UA_Variant_new();
+        UA_Variant_setScalarCopy(v, data->data, data->type);
+        return v;
+    }
+    ua_array *array = ua_getarray(L, index);
+    if(array) {
+        UA_Variant *v = UA_Variant_new();
+        UA_Variant_setArrayCopy(v, *array->data, *array->length, array->type);
+        return v;
+    }
+    return NULL;
+}
+
+static void *
+ua_type_parse(lua_State *L, const UA_DataType *type, int index) {
+    if(lua_isnil(L, index)) {
+        if(type == &UA_TYPES[UA_TYPES_VARIANT]) {
+            luaL_error(L, "Variants cannot be empty");
+            return NULL;
+        }
         return UA_new(type);
+    }
     if(!type->builtin) {
         luaL_error(L, "Only builtin types can be instantiated with arguments");
         return NULL;
@@ -115,6 +137,8 @@ static void *ua_type_parse(lua_State *L, const UA_DataType *type, int index) {
         return parse_qualifiedname(L, index);
     case UA_TYPES_LOCALIZEDTEXT:
         return parse_localizedtext(L, index);
+    case UA_TYPES_VARIANT:
+        return parse_variant(L, index);
     case UA_TYPES_SBYTE:
     case UA_TYPES_BYTE:
     case UA_TYPES_INT16:
@@ -144,9 +168,127 @@ static void *ua_type_parse(lua_State *L, const UA_DataType *type, int index) {
             return i64;
         }
     }
+    case UA_TYPES_FLOAT: {
+        if(!lua_isnumber(L, index))
+            luaL_error(L, "Argument is not a number");
+        lua_Number n = lua_tonumber(L, index);
+        UA_Float *v = UA_Float_new();
+        *v = n;
+        return v;
     }
-    luaL_error(L, "Cannot parse the arguments for the data type");
+    case UA_TYPES_DOUBLE: {
+        if(!lua_isnumber(L, index))
+            luaL_error(L, "Argument is not a number");
+        lua_Number n = lua_tonumber(L, index);
+        UA_Double *v = UA_Double_new();
+        *v = n;
+        return v;
+    }
+    }
+    luaL_error(L, "Cannot parse arguments for this data type");
     return NULL;
+}
+
+/********************/
+/* Variant Handling */
+/********************/
+
+static int
+ua_variant_index(lua_State *L, UA_Variant *v, const char *key) {
+    if(strcmp(key, "value") == 0) {
+        if(UA_Variant_isScalar(v)) {
+            ua_data *data = lua_newuserdata(L, sizeof(ua_data));
+            data->type = v->type;
+            data->data = UA_new(v->type);
+            UA_copy(v->data, data->data, v->type);
+            luaL_setmetatable(L, "open62541-data");
+            return 1;
+        } else {
+            ua_array *array = lua_newuserdata(L, sizeof(ua_array));
+            array->type = v->type;
+            array->data = &array->local_data;
+            array->length = &array->local_length;
+            UA_Array_copy(v->data, v->arrayLength, &array->local_data, v->type);
+            array->local_length = v->arrayLength;
+            luaL_setmetatable(L, "open62541-array");
+            return 1;
+        }
+    } else if(strcmp(key, "arrayDimensions") == 0) {
+        ua_array *array = lua_newuserdata(L, sizeof(ua_array));
+        array->type = &UA_TYPES[UA_TYPES_UINT32];
+        array->data = &array->local_data;
+        array->length = &array->local_length;
+        UA_Array_copy(v->arrayDimensions, v->arrayDimensionsSize, &array->local_data, &UA_TYPES[UA_TYPES_UINT32]);
+        array->local_length = v->arrayDimensionsSize;
+        luaL_setmetatable(L, "open62541-array");
+        return 1;
+    }
+    return luaL_error(L, "Cannot get this Variant content");
+}
+
+static int
+ua_variant_newindex(lua_State *L, UA_Variant *v, const char *key, size_t index) {
+    if(strcmp(key, "value") == 0) {
+        ua_data *data = ua_getdata(L, index);
+        if(data) {
+            if(v->storageType == UA_VARIANT_DATA) {
+                if(UA_Variant_isScalar(v))
+                    UA_delete(v->data, v->type);
+                else
+                    UA_Array_delete(v->data, v->arrayLength, v->type);
+            }
+            UA_Variant_setScalarCopy(v, data->data, data->type);
+            return 0;
+        }
+        ua_array *array = ua_getarray(L, index);
+        if(array) {
+            if(v->storageType == UA_VARIANT_DATA) {
+                if(UA_Variant_isScalar(v))
+                    UA_delete(v->data, v->type);
+                else
+                    UA_Array_delete(v->data, v->arrayLength, v->type);
+            }
+            UA_Variant_setArrayCopy(v, *array->data, *array->length, array->type);
+            return 0;
+        }
+        return luaL_error(L, "Cannot set this data type to the variant");
+    } else if(strcmp(key, "arrayDimensions") == 0) {
+        ua_array *array = ua_getarray(L, index);
+        // allow int32 as most users will give a simple {1,2,3} lua array
+        if(array->type != &UA_TYPES[UA_TYPES_UINT32] &&
+           array->type != &UA_TYPES[UA_TYPES_INT32]) {
+            return luaL_error(L, "Array dimensions need to be an array of UInt32");
+        }
+        // todo: test if the dimensions match
+        UA_Array_delete(v->arrayDimensions, v->arrayDimensionsSize, &UA_TYPES[UA_TYPES_UINT32]);
+        UA_Array_copy(*array->data, *array->length, (void**)&v->arrayDimensions, &UA_TYPES[UA_TYPES_UINT32]);
+        v->arrayDimensionsSize = *array->length;
+        return 0;
+    }
+    return luaL_error(L, "Not a valid variant index");
+}
+
+/**********************/
+/* DataValue Handling */
+/**********************/
+
+static int
+ua_datavalue_index(lua_State *L, UA_DataValue *v, const char *key) {
+    if(strcmp(key, "value") == 0) {
+        if(!v->hasValue) {
+            lua_pushnil(L);
+            return 1;
+        }
+        UA_Variant *copy = UA_Variant_new();
+        UA_Variant_copy(&v->value, copy);
+        ua_data *data = lua_newuserdata(L, sizeof(ua_data));
+        data->type = &UA_TYPES[UA_TYPES_VARIANT];
+        data->data = copy;
+        luaL_setmetatable(L, "open62541-data");
+        return 1;
+    }
+    lua_pushnil(L);
+    return 1;
 }
 
 /* General type constructor function. Takes the datatype from its closure. */
@@ -197,10 +339,8 @@ int ua_get_type(lua_State *L) {
         ua_array *array = luaL_checkudata(L, 1, "open62541-array");
         type = array->type;
     }
-    if(!type) {
-        lua_pushnil(L);
-        return 1;
-    }
+    if(!type)
+        return luaL_error(L, "Not an ua type");
     lua_newtable(L);
     luaL_setmetatable(L, "open62541-type");
     lua_pushlightuserdata(L, (void*)(uintptr_t)type);
@@ -213,7 +353,8 @@ int ua_get_type(lua_State *L) {
 /**************************/
 
 /* Read the data at the index in the lua stack, replace it with an open62541 data and return a pointer */
-ua_data * ua_getdata(lua_State *L, int index) {
+ua_data *
+ua_getdata(lua_State *L, int index) {
     ua_data *data = luaL_testudata(L, index , "open62541-data");
     if(data)
         return data;
@@ -227,21 +368,83 @@ ua_data * ua_getdata(lua_State *L, int index) {
         luaL_setmetatable(L, "open62541-data");
         lua_replace(L, index);
     } else if(lua_isnumber(L, index)) {
+        lua_Number n = lua_tonumber(L, index);
         data = lua_newuserdata(L, sizeof(ua_data));
-        data->type = &UA_TYPES[UA_TYPES_INT32];
-        data->data = UA_Int32_new();
-        *(UA_Int32*)data->data = lua_tonumber(L, index);
+        if(n == (int)n) {
+            data->data = UA_Int32_new();
+            *(UA_Int32*)data->data = n;
+            data->type = &UA_TYPES[UA_TYPES_INT32];
+        } else {
+            data->data = UA_Float_new();
+            *(UA_Float*)data->data = n;
+            data->type = &UA_TYPES[UA_TYPES_FLOAT];
+        }
         luaL_setmetatable(L, "open62541-data");
         lua_replace(L, index);
     } else if(lua_isstring(L, index)) {
         data = lua_newuserdata(L, sizeof(ua_data));
         data->type = &UA_TYPES[UA_TYPES_STRING];
         data->data = parse_string(L, index);
-        luaL_setmetatable(L, "open62541-builtin");
+        luaL_setmetatable(L, "open62541-data");
         lua_replace(L, index);
-    }
+    } else
+        return NULL;
     return data;
 }
+
+ua_array *
+ua_getarray(lua_State *L, int index) {
+    ua_array *array = luaL_testudata(L, index , "open62541-array");
+    if(array)
+        return array;
+    if(!lua_istable(L, index))
+        return NULL;
+
+    lua_len(L, index);
+    int len = lua_tointeger(L, -1);
+    lua_pop(L, 1);
+    if(len <= 0)
+        return NULL;
+
+    const UA_DataType *type = NULL;
+    lua_rawgeti(L, index, 1);
+    ua_data *data = ua_getdata(L, -1);
+    if(!data) {
+        luaL_error(L, "Cannot transform array content to ua type");
+        return NULL;
+    }
+    type = data->type;
+
+    array = lua_newuserdata(L, sizeof(ua_array));
+    array->type = type;
+    array->data = &array->local_data;
+    array->length = &array->local_length;
+    array->local_data = UA_Array_new(len, type);
+    array->local_length = len;
+    luaL_setmetatable(L, "open62541-array");
+    UA_copy(data->data, array->local_data, type);
+    lua_remove(L, -2); // the data
+    
+    uintptr_t pos = (uintptr_t)array->local_data + type->memSize;
+    for(int i = 2; i <= len; i++) {
+        lua_rawgeti(L, index, i);
+        data = ua_getdata(L, -1);
+        if(!data) {
+            luaL_error(L, "Cannot transform array content to ua type");
+            return NULL;
+        }
+        if(data->type != type) {
+            luaL_error(L, "Array contains different data types");
+            return NULL;
+        }
+        UA_copy(data->data, (void*)pos, type);
+        pos += type->memSize;
+        lua_pop(L, 1); // the data
+    }
+    lua_replace(L, index); // replace the lua table on the stack with the ua table
+    return array;
+}
+
 
 static void
 push_lowercase(lua_State *L, const char *str) {
@@ -341,49 +544,6 @@ ua_getmemberindex(lua_State *L, ua_data *data, int memberindex) {
     return 1;
 }
 
-static int
-ua_variant_index(lua_State *L, UA_Variant *v, const char *key) {
-    if(strcmp(key, "value") == 0) {
-        if(UA_Variant_isScalar(v)) {
-            ua_data *data = lua_newuserdata(L, sizeof(ua_data));
-            data->type = v->type;
-            data->data = UA_new(v->type);
-            UA_copy(v->data, data->data, v->type);
-            luaL_setmetatable(L, "open62541-data");
-            return 1;
-        } else {
-            ua_array *array = lua_newuserdata(L, sizeof(ua_array));
-            array->type = v->type;
-            array->data = &array->local_data;
-            array->length = &array->local_length;
-            UA_Array_copy(v->data, v->arrayLength, &array->local_data, v->type);
-            array->local_length = v->arrayLength;
-            luaL_setmetatable(L, "open62541-array");
-            return 1;
-        }
-    }
-    return luaL_error(L, "Cannot get this Variant content");
-}
-
-static int
-ua_datavalue_index(lua_State *L, UA_DataValue *v, const char *key) {
-    if(strcmp(key, "value") == 0) {
-        if(!v->hasValue) {
-            lua_pushnil(L);
-            return 1;
-        }
-        UA_Variant *copy = UA_Variant_new();
-        UA_Variant_copy(&v->value, copy);
-        ua_data *data = lua_newuserdata(L, sizeof(ua_data));
-        data->type = &UA_TYPES[UA_TYPES_VARIANT];
-        data->data = copy;
-        luaL_setmetatable(L, "open62541-data");
-        return 1;
-    }
-    lua_pushnil(L);
-    return 1;
-}
-
 int ua_index(lua_State *L) {
     ua_data *data = luaL_checkudata (L, -2, "open62541-data");
     if(!lua_isstring(L, -1))
@@ -399,25 +559,6 @@ int ua_index(lua_State *L) {
         return 1;
     }
     return ua_getmemberindex(L, data, memberindex);
-}
-
-static int
-ua_variant_newindex(lua_State *L, UA_Variant *v, const char *key, size_t index) {
-    if(strcmp(key, "value") != 0)
-       return luaL_error(L, "Can only set the value for now");
-    ua_data *data = ua_getdata(L, index);
-    if(data) {
-        UA_Variant_deleteMembers(v);
-        UA_Variant_setScalarCopy(v, data->data, data->type);
-        return 0;
-    }
-    ua_array *array = luaL_checkudata (L, index, "open62541-array");
-    if(array) {
-        UA_Variant_deleteMembers(v);
-        UA_Variant_setArrayCopy(v, *array->data, *array->length, array->type);
-        return 0;
-    }
-    return luaL_error(L, "Cannot set this data type to the variant");
 }
 
 int ua_newindex(lua_State *L) {
@@ -437,7 +578,7 @@ int ua_newindex(lua_State *L) {
     void *member = memberptr(parent->data, parent->type, memberindex, &arraylen);
 
     if(arraylen) {
-        ua_array *array = luaL_checkudata(L, 3, "open62541-array");
+        ua_array *array = ua_getarray(L, 3);
         if(!array)
             return luaL_error(L, "The value is not an array");
         if(membertype != array->type)
@@ -878,9 +1019,9 @@ int ua_array_newindex(lua_State *L) {
     /* overwrite an entry */
     if(index < 0 || index >= *array->length)
         return luaL_error(L, "The index is out of range");
-	uintptr_t ptr = *array->data;
-    UA_deleteMembers(ptr + (index * array->type->memSize), array->type);
-    UA_copy(data->data, ptr + (index * array->type->memSize), array->type);
+	uintptr_t ptr = (uintptr_t)*array->data + (index * array->type->memSize);
+    UA_deleteMembers((void*)ptr, array->type);
+    UA_copy(data->data, (void*)ptr, array->type);
     return 0;
 }
 
@@ -911,7 +1052,7 @@ ua_array_iterate(lua_State *L) {
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
     data->type = array->type;
     data->data = UA_new(array->type);
-	uintptr_t ptr = *array->data;
+	uintptr_t ptr = (uintptr_t)*array->data;
     ptr += index * array->type->memSize;
     UA_copy((void*)ptr, data->data, array->type);
     luaL_setmetatable(L, "open62541-data");
