@@ -1,3 +1,5 @@
+// This file is a part of uascript. License is MIT (see LICENSE file)
+
 #ifndef UASCRIPT_H_
 #define UASCRIPT_H_
 

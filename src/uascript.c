@@ -1,3 +1,5 @@
+// This file is a part of uascript. License is MIT (see LICENSE file)
+
 #include "uascript.h"
 #include "lualib.h"
 #include "lauxlib.h"

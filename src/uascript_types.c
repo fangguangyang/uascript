@@ -1,3 +1,5 @@
+// This file is a part of uascript. License is MIT (see LICENSE file)
+
 #include "uascript.h"
 #include "lualib.h"
 #include "lauxlib.h"
@@ -231,7 +233,7 @@ ua_variant_newindex(lua_State *L, UA_Variant *v, const char *key, size_t index) 
     if(strcmp(key, "value") == 0) {
         ua_data *data = ua_getdata(L, index);
         if(data) {
-            if(v->storageType == UA_VARIANT_DATA) {
+            if(v->data > UA_EMPTY_ARRAY_SENTINEL && v->storageType == UA_VARIANT_DATA) {
                 if(UA_Variant_isScalar(v))
                     UA_delete(v->data, v->type);
                 else
@@ -242,7 +244,7 @@ ua_variant_newindex(lua_State *L, UA_Variant *v, const char *key, size_t index) 
         }
         ua_array *array = ua_getarray(L, index);
         if(array) {
-            if(v->storageType == UA_VARIANT_DATA) {
+            if(v->data > UA_EMPTY_ARRAY_SENTINEL && v->storageType == UA_VARIANT_DATA) {
                 if(UA_Variant_isScalar(v))
                     UA_delete(v->data, v->type);
                 else
