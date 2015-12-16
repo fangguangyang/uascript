@@ -41,7 +41,6 @@ int ua_gc(lua_State *L);
 int ua_index(lua_State *L);
 int ua_newindex(lua_State *L);
 int ua_tostring(lua_State *L);
-int ua_len(lua_State *L);
 int ua_pairs(lua_State *L);
 ua_data * ua_getdata(lua_State *L, int index);
 int ua_get_type(lua_State *L);

@@ -74,8 +74,6 @@ int luaopen_uascript(lua_State *L) {
     lua_setfield(L, -2, "__newindex");
     lua_pushcfunction(L, ua_pairs);
     lua_setfield(L, -2, "__pairs");
-    lua_pushcfunction(L, ua_len);
-    lua_setfield(L, -2, "__len");
     lua_pushcfunction(L, ua_index);
     lua_setfield(L, -2, "__index");
     lua_pop(L, 1);
@@ -90,6 +88,8 @@ int luaopen_uascript(lua_State *L) {
     lua_setfield(L, -2, "__len");
     lua_pushcfunction(L, ua_array_pairs);
     lua_setfield(L, -2, "__pairs");
+    lua_pushcfunction(L, ua_array_pairs);
+    lua_setfield(L, -2, "__ipairs");
     lua_pushcfunction(L, ua_array_index);
     lua_setfield(L, -2, "__index");
     lua_pop(L, 1);

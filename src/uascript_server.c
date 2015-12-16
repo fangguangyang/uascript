@@ -400,14 +400,14 @@ int ua_server_write(lua_State *L) {
 
     UA_StatusCode retval;
     if(attrId != UA_ATTRIBUTEID_VALUE) {
-        retval = __UA_Server_writeAttribute(server->server, *(UA_NodeId*)sourceId->data,
-                                            (UA_AttributeId)attrId, value->type, value->data);
+        retval = __UA_Server_write(server->server, (UA_NodeId*)sourceId->data,
+                                   (UA_AttributeId)attrId, value->type, value->data);
     } else {
         UA_Variant v;
         UA_Variant_init(&v);
         UA_Variant_setScalarCopy(&v, value->data, value->type);
-        retval = __UA_Server_writeAttribute(server->server, *(UA_NodeId*)sourceId->data,
-                                            (UA_AttributeId)attrId, &UA_TYPES[UA_TYPES_VARIANT], &v);
+        retval = __UA_Server_write(server->server, (UA_NodeId*)sourceId->data,
+                                   (UA_AttributeId)attrId, &UA_TYPES[UA_TYPES_VARIANT], &v);
     }
     UA_WriteValue wv;
     UA_WriteValue_init(&wv);
@@ -497,7 +497,7 @@ int ua_server_read(lua_State *L) {
         return luaL_error(L, "Unknown attribute");
     }
     void *v = UA_new(type);
-    UA_StatusCode retval = __UA_Server_readAttribute(server->server, sourceId->data, attrId, v);
+    UA_StatusCode retval = __UA_Server_read(server->server, sourceId->data, attrId, v);
     if(retval != UA_STATUSCODE_GOOD) {
         UA_delete(v, type);
         lua_pushnil(L);

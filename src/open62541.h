@@ -1,6 +1,6 @@
 /* THIS IS A SINGLE-FILE DISTRIBUTION CONCATENATED FROM THE OPEN62541 SOURCES 
  * visit http://open62541.org/ for information about this software
- * Git-Revision: v0.1.0-RC4-874-g360f03b-dirty
+ * Git-Revision: v0.1.0-RC4-914-g6a52c4e
  */
  
  /*
@@ -32,14 +32,21 @@ extern "C" {
 
 #ifndef _XOPEN_SOURCE
 # define _XOPEN_SOURCE 500
+# define _BSD_SOURCE
 #endif
 
 #define UA_LOGLEVEL 300
-/* #undef UA_MULTITHREADING */
-#define ENABLE_METHODCALLS
-#define ENABLE_SUBSCRIPTIONS
-#define ENABLE_TYPEINTROSPECTION
-/* #undef UA_EMBEDDED_LIBC */
+/* #undef UA_ENABLE_MULTITHREADING */
+#define UA_ENABLE_METHODCALLS
+#define UA_ENABLE_SUBSCRIPTIONS
+#define UA_ENABLE_TYPENAMES
+/* #undef UA_ENABLE_EMBEDDED_LIBC */
+/* #undef UA_ENABLE_GENERATE_NAMESPACE0 */
+/* #undef UA_ENABLE_EXTERNAL_NAMESPACES */
+#define UA_ENABLE_NODEMANAGEMENT
+
+/* #undef UA_ENABLE_NONSTANDARD_UDP */
+/* #undef UA_ENABLE_NONSTANDARD_STATELESS */
 
 /* Function Export */
 #ifdef _WIN32
@@ -66,16 +73,23 @@ extern "C" {
 
 /* Endianness */
 #if defined(__linux__) || defined(__APPLE__)
-#  ifndef __QNX__
-#    if defined(__APPLE__) || defined(__MACH__)
-#     include <machine/endian.h>
-#    else
-#     include <endian.h>
-#    endif
+# ifndef __QNX__
+#  if defined(__APPLE__) || defined(__MACH__)
+#   include <machine/endian.h>
+#  else
+#   include <endian.h>
 #  endif
+# endif
 # if ( __BYTE_ORDER != __LITTLE_ENDIAN )
 #  define UA_NON_LITTLEENDIAN_ARCHITECTURE
 # endif
+#elif _WIN32
+# define htole16(x) (x)
+# define htole32(x) (x)
+# define htole64(x) (x)
+# define le16toh(x) (x)
+# define le32toh(x) (x)
+# define le64toh(x) (x)
 #endif
 
 /* Force non-little endian manually by setting the following. */
@@ -91,11 +105,6 @@ extern "C" {
 #ifdef __ARM_ARCH_4T__
 # define UA_MIXED_ENDIAN
 # define UA_NON_LITTLEENDIAN_ARCHITECTURE
-#endif
-
-/* Aligned Memory Access */
-#if defined(__arm__) && !defined(__ARM_FEATURE_UNALIGNED)
-# define UA_ALIGNED_MEMORY_ACCESS
 #endif
 
 /* Inline Functions */
@@ -128,7 +137,7 @@ extern "C" {
 #endif
 
 #include <stddef.h>
-#ifdef UA_EMBEDDED_LIBC
+#ifdef UA_ENABLE_EMBEDDED_LIBC
   void *memcpy(void *UA_RESTRICT dest, const void *UA_RESTRICT src, size_t n);
   void *memset(void *dest, int c, size_t n);
   size_t strlen(const char *s);
@@ -478,11 +487,24 @@ UA_Boolean UA_EXPORT UA_String_equal(const UA_String *s1, const UA_String *s2);
 /*********************************/
 /* DateTime: An instance in time */
 /*********************************/
+
 /* A DateTime value is encoded as a 64-bit signed integer which represents the
    number of 100 nanosecond intervals since January 1, 1601 (UTC) */
 typedef UA_Int64 UA_DateTime;
 
-UA_DateTime UA_EXPORT UA_DateTime_now(void); ///> The current time
+/* Multiply to convert units for time difference computations */
+#define UA_USEC_TO_DATETIME 10LL
+#define UA_MSEC_TO_DATETIME (UA_USEC_TO_DATETIME * 1000LL)
+#define UA_SEC_TO_DATETIME (UA_MSEC_TO_DATETIME * 1000LL)
+
+/* Datetime of 1 Jan 1970 00:00 UTC */
+#define UA_DATETIME_UNIX_EPOCH (11644473600LL * UA_SEC_TO_DATETIME)
+
+/* The current time */
+UA_DateTime UA_EXPORT UA_DateTime_now(void);
+
+/* CPU clock invariant to system time changes. Use only for time diffs, not current time */
+UA_DateTime UA_EXPORT UA_DateTime_nowMonotonic(void);
 
 typedef struct UA_DateTimeStruct {
     UA_UInt16 nanoSec;
@@ -520,11 +542,12 @@ UA_Guid UA_EXPORT UA_Guid_random(void);
 /************************************/
 typedef UA_String UA_ByteString;
 
-static UA_INLINE UA_Boolean UA_ByteString_equal(const UA_ByteString *string1, const UA_ByteString *string2) {
+static UA_INLINE UA_Boolean
+UA_ByteString_equal(const UA_ByteString *string1, const UA_ByteString *string2) {
     return UA_String_equal((const UA_String*)string1, (const UA_String*)string2); }
 
 /* Allocates memory of size length for the bytestring. The content is not set to zero. */
-UA_StatusCode UA_EXPORT UA_ByteString_allocBuffer(UA_ByteString *bs, size_t length) UA_FUNC_ATTR_WARN_UNUSED_RESULT;
+UA_StatusCode UA_EXPORT UA_ByteString_allocBuffer(UA_ByteString *bs, size_t length);
 
 UA_EXPORT extern const UA_ByteString UA_BYTESTRING_NULL;
 
@@ -709,8 +732,8 @@ typedef struct {
 } UA_Variant;
 
 /**
- * Returns true if the variant contains a scalar value. Note that empty variants contain an array of
- * length -1 (undefined).
+ * Returns true if the variant contains a scalar value. Note that empty variants
+ * contain an array of length -1 (undefined).
  *
  * @param v The variant
  * @return Does the variant contain a scalar value.
@@ -719,14 +742,15 @@ static UA_INLINE UA_Boolean UA_Variant_isScalar(const UA_Variant *v) {
     return (v->arrayLength == 0 && v->data > UA_EMPTY_ARRAY_SENTINEL); }
     
 /**
- * Set the variant to a scalar value that already resides in memory. The value takes on the
- * lifecycle of the variant and is deleted with it.
+ * Set the variant to a scalar value that already resides in memory. The value
+ * takes on the lifecycle of the variant and is deleted with it.
  *
  * @param v The variant
  * @param p A pointer to the value data
  * @param type The datatype of the value in question
  */
-void UA_EXPORT UA_Variant_setScalar(UA_Variant *v, void * UA_RESTRICT p, const UA_DataType *type);
+void UA_EXPORT
+UA_Variant_setScalar(UA_Variant *v, void * UA_RESTRICT p, const UA_DataType *type);
 
 /**
  * Set the variant to a scalar value that is copied from an existing variable.
@@ -736,11 +760,12 @@ void UA_EXPORT UA_Variant_setScalar(UA_Variant *v, void * UA_RESTRICT p, const U
  * @param type The datatype of the value
  * @return Indicates whether the operation succeeded or returns an error code
  */
-UA_StatusCode UA_EXPORT UA_Variant_setScalarCopy(UA_Variant *v, const void *p, const UA_DataType *type);
+UA_StatusCode UA_EXPORT
+UA_Variant_setScalarCopy(UA_Variant *v, const void *p, const UA_DataType *type);
 
 /**
- * Set the variant to an array that already resides in memory. The array takes on the lifecycle of
- * the variant and is deleted with it.
+ * Set the variant to an array that already resides in memory. The array takes
+ * on the lifecycle of the variant and is deleted with it.
  *
  * @param v The variant
  * @param array A pointer to the array data
@@ -748,7 +773,8 @@ UA_StatusCode UA_EXPORT UA_Variant_setScalarCopy(UA_Variant *v, const void *p, c
  * @param type The datatype of the array
  */
 void UA_EXPORT
-UA_Variant_setArray(UA_Variant *v, void * UA_RESTRICT array, size_t arraySize, const UA_DataType *type);
+UA_Variant_setArray(UA_Variant *v, void * UA_RESTRICT array,
+                    size_t arraySize, const UA_DataType *type);
 
 /**
  * Set the variant to an array that is copied from an existing array.
@@ -760,7 +786,8 @@ UA_Variant_setArray(UA_Variant *v, void * UA_RESTRICT array, size_t arraySize, c
  * @return Indicates whether the operation succeeded or returns an error code
  */
 UA_StatusCode UA_EXPORT
-UA_Variant_setArrayCopy(UA_Variant *v, const void *array, size_t arraySize, const UA_DataType *type);
+UA_Variant_setArrayCopy(UA_Variant *v, const void *array,
+                        size_t arraySize, const UA_DataType *type);
 
 /* NumericRanges are used to indicate subsets of a (multidimensional) variant
  * array. NumericRange has no official type structure in the standard. On the
@@ -799,7 +826,8 @@ UA_Variant_copyRange(const UA_Variant *src, UA_Variant *dst, const UA_NumericRan
  * @return Returns UA_STATUSCODE_GOOD or an error code
  */
 UA_StatusCode UA_EXPORT
-UA_Variant_setRange(UA_Variant *v, void * UA_RESTRICT array, size_t arraySize, const UA_NumericRange range);
+UA_Variant_setRange(UA_Variant *v, void * UA_RESTRICT array,
+                    size_t arraySize, const UA_NumericRange range);
 
 /**
  * Deep-copy a range of data into an existing variant.
@@ -811,7 +839,8 @@ UA_Variant_setRange(UA_Variant *v, void * UA_RESTRICT array, size_t arraySize, c
  * @return Returns UA_STATUSCODE_GOOD or an error code
  */
 UA_StatusCode UA_EXPORT
-UA_Variant_setRangeCopy(UA_Variant *v, const void *array, size_t arraySize, const UA_NumericRange range);
+UA_Variant_setRangeCopy(UA_Variant *v, const void *array,
+                        size_t arraySize, const UA_NumericRange range);
 
 /**************************************************************************/
 /* DataValue: A data value with an associated status code and timestamps. */
@@ -826,9 +855,9 @@ typedef struct {
     UA_Variant    value;
     UA_StatusCode status;
     UA_DateTime   sourceTimestamp;
-    UA_Int16      sourcePicoseconds;
+    UA_UInt16     sourcePicoseconds;
     UA_DateTime   serverTimestamp;
-    UA_Int16      serverPicoseconds;
+    UA_UInt16     serverPicoseconds;
 } UA_DataValue;
 
 /***************************************************************************/
@@ -859,21 +888,23 @@ typedef struct UA_DiagnosticInfo {
 #define UA_MAX_TYPE_MEMBERS 13 // Maximum number of members per structured type
 
 typedef struct {
-#ifdef ENABLE_TYPEINTROSPECTION
+#ifdef UA_ENABLE_TYPENAMES
     const char *memberName;
 #endif
     UA_UInt16   memberTypeIndex;   ///< Index of the member in the datatypetable
-    UA_Byte     padding;           /**< How much padding is there before this member element? For arrays this is
-                                        split into 2 bytes padding before the length index (max 4 bytes) and 3
-                                        bytes padding before the pointer (max 8 bytes) */
-    UA_Boolean  namespaceZero : 1; /**< The type of the member is defined in namespace zero. In this
-                                        implementation, types from custom namespace may contain
-                                        members from the same namespace or ns0 only.*/
+    UA_Byte     padding;           /**< How much padding is there before this member
+                                        element? For arrays this is the padding before the
+                                        size_t lenght member. (No padding between size_t
+                                        and the following ptr.) */
+    UA_Boolean  namespaceZero : 1; /**< The type of the member is defined in namespace
+                                        zero. In this implementation, types from custom
+                                        namespace may contain members from the same
+                                        namespace or ns0 only.*/
     UA_Boolean  isArray       : 1; ///< The member is an array of the given type
 } UA_DataTypeMember;
     
 struct UA_DataType {
-#ifdef ENABLE_TYPEINTROSPECTION
+#ifdef UA_ENABLE_TYPENAMES
     const char *typeName;
 #endif
     UA_NodeId   typeId;           ///< The nodeid of the type
@@ -913,7 +944,7 @@ static UA_INLINE void UA_init(void *p, const UA_DataType *type) {
  * @return Indicates whether the operation succeeded or returns an error code
  */
 UA_StatusCode UA_EXPORT
-UA_copy(const void *src, void *dst, const UA_DataType *type) UA_FUNC_ATTR_WARN_UNUSED_RESULT;
+UA_copy(const void *src, void *dst, const UA_DataType *type);
 
 /**
  * Deletes the dynamically assigned content of a variable (e.g. a member-array).
@@ -1014,8 +1045,8 @@ typedef enum {
 /***************************/
 
 /**
- * If UA_MULTITHREADING is enabled, then the seed is stored in thread local storage. The seed is
- * initialized for every thread in the server/client.
+ * If UA_ENABLE_MULTITHREADING is defined, then the seed is stored in thread local
+ * storage. The seed is initialized for every thread in the server/client.
  */
 UA_EXPORT void UA_random_seed(UA_UInt64 seed);
 
@@ -1030,7 +1061,7 @@ UA_EXPORT void UA_random_seed(UA_UInt64 seed);
  * /home/jpfr/software/open62541/build/src_generated/ua_nodeids.hgen -- do not modify
  **********************************************************
  * Generated from /home/jpfr/software/open62541/tools/schema/NodeIds.csv with script /home/jpfr/software/open62541/tools/generate_nodeids.py
- * on host virtualbox by user jpfr at 2015-12-10 12:58:59
+ * on host virtualbox by user jpfr at 2015-12-15 07:22:34
  **********************************************************/
  
 
@@ -1735,7 +1766,7 @@ UA_EXPORT void UA_random_seed(UA_UInt64 seed);
 * @brief Autogenerated data types
 *
 * Generated from Opc.Ua.Types.bsd with script /home/jpfr/software/open62541/tools/generate_datatypes.py
-* on host virtualbox by user jpfr at 2015-12-11 02:09:42
+* on host virtualbox by user jpfr at 2015-12-16 04:18:39
 */
 
 
@@ -4426,7 +4457,7 @@ UA_Server_addDataSourceVariableNode(UA_Server *server, const UA_NodeId requested
                                     const UA_VariableAttributes attr, const UA_DataSource dataSource,
                                     UA_NodeId *outNewNodeId);
 
-#ifdef ENABLE_METHODCALLS
+#ifdef UA_ENABLE_METHODCALLS
 typedef UA_StatusCode (*UA_MethodCallback)(void *methodHandle, const UA_NodeId objectId,
                                            size_t inputSize, const UA_Variant *input,
                                            size_t outputSize, UA_Variant *output);
@@ -4445,13 +4476,13 @@ UA_Server_addMethodNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
 /* Write Node Attributes */
 /*************************/
 
-/* The following node attributes cannot be changed once the node is created
+/* The following node attributes cannot be written
    - NodeClass
    - NodeId
    - Symmetric
    - ContainsNoLoop
    
-   The following attributes cannot be written, as there is no "user" in the server
+   The following attributes cannot be written from the server, as there is no "user" in the server
    - UserWriteMask
    - UserAccessLevel
    - UserExecutable
@@ -4467,51 +4498,52 @@ UA_Server_addMethodNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
 
 /* Don't use this function. There are typed versions with no additional overhead. */
 UA_StatusCode UA_EXPORT
-__UA_Server_writeAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_AttributeId attributeId, const UA_DataType *type, const void *value);
+__UA_Server_write(UA_Server *server, const UA_NodeId *nodeId, const UA_AttributeId attributeId,
+                  const UA_DataType *type, const void *value);
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeBrowseNameAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_QualifiedName browseName) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_BROWSENAME, &UA_TYPES[UA_TYPES_QUALIFIEDNAME], &browseName); }
+UA_Server_writeBrowseName(UA_Server *server, const UA_NodeId nodeId, const UA_QualifiedName browseName) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_BROWSENAME, &UA_TYPES[UA_TYPES_QUALIFIEDNAME], &browseName); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeDisplayNameAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_LocalizedText displayName) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_DISPLAYNAME, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT], &displayName); }
+UA_Server_writeDisplayName(UA_Server *server, const UA_NodeId nodeId, const UA_LocalizedText displayName) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_DISPLAYNAME, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT], &displayName); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeDescriptionAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_LocalizedText description) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_DESCRIPTION, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT], &description); }
+UA_Server_writeDescription(UA_Server *server, const UA_NodeId nodeId, const UA_LocalizedText description) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_DESCRIPTION, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT], &description); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeWriteMaskAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_UInt32 writeMask) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_WRITEMASK, &UA_TYPES[UA_TYPES_UINT32], &writeMask); }
+UA_Server_writeWriteMask(UA_Server *server, const UA_NodeId nodeId, const UA_UInt32 writeMask) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_WRITEMASK, &UA_TYPES[UA_TYPES_UINT32], &writeMask); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeIsAbstractAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_Boolean isAbstract) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_ISABSTRACT, &UA_TYPES[UA_TYPES_BOOLEAN], &isAbstract); }
+UA_Server_writeIsAbstract(UA_Server *server, const UA_NodeId nodeId, const UA_Boolean isAbstract) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_ISABSTRACT, &UA_TYPES[UA_TYPES_BOOLEAN], &isAbstract); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeInverseNameAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_LocalizedText inverseName) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_INVERSENAME, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT], &inverseName); }
+UA_Server_writeInverseName(UA_Server *server, const UA_NodeId nodeId, const UA_LocalizedText inverseName) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_INVERSENAME, &UA_TYPES[UA_TYPES_LOCALIZEDTEXT], &inverseName); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeEventNotifierAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_Byte eventNotifier) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_EVENTNOTIFIER, &UA_TYPES[UA_TYPES_BYTE], &eventNotifier); }
+UA_Server_writeEventNotifier(UA_Server *server, const UA_NodeId nodeId, const UA_Byte eventNotifier) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_EVENTNOTIFIER, &UA_TYPES[UA_TYPES_BYTE], &eventNotifier); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeValueAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_Variant value) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_VALUE, &UA_TYPES[UA_TYPES_VARIANT], &value); }
+UA_Server_writeValue(UA_Server *server, const UA_NodeId nodeId, const UA_Variant value) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_VALUE, &UA_TYPES[UA_TYPES_VARIANT], &value); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeAccessLevelAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_UInt32 accessLevel) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_ACCESSLEVEL, &UA_TYPES[UA_TYPES_UINT32], &accessLevel); }
+UA_Server_writeAccessLevel(UA_Server *server, const UA_NodeId nodeId, const UA_UInt32 accessLevel) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_ACCESSLEVEL, &UA_TYPES[UA_TYPES_UINT32], &accessLevel); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeMinimumSamplingIntervalAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_Double miniumSamplingInterval) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_MINIMUMSAMPLINGINTERVAL, &UA_TYPES[UA_TYPES_DOUBLE], &miniumSamplingInterval); }
+UA_Server_writeMinimumSamplingInterval(UA_Server *server, const UA_NodeId nodeId, const UA_Double miniumSamplingInterval) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_MINIMUMSAMPLINGINTERVAL, &UA_TYPES[UA_TYPES_DOUBLE], &miniumSamplingInterval); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_writeExecutableAttribute(UA_Server *server, const UA_NodeId nodeId, const UA_Boolean executable) {
-    return __UA_Server_writeAttribute(server, nodeId, UA_ATTRIBUTEID_EXECUTABLE, &UA_TYPES[UA_TYPES_BOOLEAN], &executable); }
+UA_Server_writeExecutable(UA_Server *server, const UA_NodeId nodeId, const UA_Boolean executable) {
+    return __UA_Server_write(server, &nodeId, UA_ATTRIBUTEID_EXECUTABLE, &UA_TYPES[UA_TYPES_BOOLEAN], &executable); }
 
 /************************/
 /* Read Node Attributes */
@@ -4525,84 +4557,99 @@ UA_Server_writeExecutableAttribute(UA_Server *server, const UA_NodeId nodeId, co
 
 /* Don't use this function. There are typed versions for every supported attribute. */
 UA_StatusCode UA_EXPORT
-__UA_Server_readAttribute(UA_Server *server, const UA_NodeId *nodeId, UA_AttributeId attributeId, void *v);
+__UA_Server_read(UA_Server *server, const UA_NodeId *nodeId, UA_AttributeId attributeId, void *v);
   
 static UA_INLINE UA_StatusCode
-UA_Server_readNodeIdAttribute(UA_Server *server, const UA_NodeId nodeId, UA_NodeId *outNodeId) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_NODEID, outNodeId); }
+UA_Server_readNodeId(UA_Server *server, const UA_NodeId nodeId, UA_NodeId *outNodeId) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_NODEID, outNodeId); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readNodeClassAttribute(UA_Server *server, const UA_NodeId nodeId, UA_NodeClass *outNodeClass) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_NODECLASS, outNodeClass); }
+UA_Server_readNodeClass(UA_Server *server, const UA_NodeId nodeId, UA_NodeClass *outNodeClass) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_NODECLASS, outNodeClass); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readBrowseNameAttribute(UA_Server *server, const UA_NodeId nodeId, UA_QualifiedName *outBrowseName) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_BROWSENAME, outBrowseName); }
+UA_Server_readBrowseName(UA_Server *server, const UA_NodeId nodeId, UA_QualifiedName *outBrowseName) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_BROWSENAME, outBrowseName); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readDisplayNameAttribute(UA_Server *server, const UA_NodeId nodeId, UA_LocalizedText *outDisplayName) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_DISPLAYNAME, outDisplayName); }
+UA_Server_readDisplayName(UA_Server *server, const UA_NodeId nodeId, UA_LocalizedText *outDisplayName) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_DISPLAYNAME, outDisplayName); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readDescriptionAttribute(UA_Server *server, const UA_NodeId nodeId, UA_LocalizedText *outDescription) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_DESCRIPTION, outDescription); }
+UA_Server_readDescription(UA_Server *server, const UA_NodeId nodeId, UA_LocalizedText *outDescription) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_DESCRIPTION, outDescription); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readWriteMaskAttribute(UA_Server *server, const UA_NodeId nodeId, UA_UInt32 *outWriteMask) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_WRITEMASK, outWriteMask); }
+UA_Server_readWriteMask(UA_Server *server, const UA_NodeId nodeId, UA_UInt32 *outWriteMask) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_WRITEMASK, outWriteMask); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readIsAbstractAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outIsAbstract) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_ISABSTRACT, outIsAbstract); }
+UA_Server_readIsAbstract(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outIsAbstract) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_ISABSTRACT, outIsAbstract); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readSymmetricAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outSymmetric) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_SYMMETRIC, outSymmetric); }
+UA_Server_readSymmetric(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outSymmetric) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_SYMMETRIC, outSymmetric); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readInverseNameAttribute(UA_Server *server, const UA_NodeId nodeId, UA_LocalizedText *outInverseName) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_INVERSENAME, outInverseName); }
+UA_Server_readInverseName(UA_Server *server, const UA_NodeId nodeId, UA_LocalizedText *outInverseName) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_INVERSENAME, outInverseName); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readContainsNoLoopAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outContainsNoLoops) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_CONTAINSNOLOOPS, outContainsNoLoops); }
+UA_Server_readContainsNoLoop(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outContainsNoLoops) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_CONTAINSNOLOOPS, outContainsNoLoops); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readEventNotifierAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Byte *outEventNotifier) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_EVENTNOTIFIER, outEventNotifier); }
+UA_Server_readEventNotifier(UA_Server *server, const UA_NodeId nodeId, UA_Byte *outEventNotifier) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_EVENTNOTIFIER, outEventNotifier); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readValueAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Variant *outValue) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_VALUE, outValue); }
+UA_Server_readValue(UA_Server *server, const UA_NodeId nodeId, UA_Variant *outValue) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_VALUE, outValue); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readDataTypeAttribute(UA_Server *server, const UA_NodeId nodeId, UA_NodeId *outDataType) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_DATATYPE, outDataType); }
+UA_Server_readDataType(UA_Server *server, const UA_NodeId nodeId, UA_NodeId *outDataType) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_DATATYPE, outDataType); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readValueRankAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Int32 *outValueRank) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_VALUERANK, outValueRank); }
+UA_Server_readValueRank(UA_Server *server, const UA_NodeId nodeId, UA_Int32 *outValueRank) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_VALUERANK, outValueRank); }
 
-// todo: fetch an array with a length field
+/* Returns a variant with an int32 array */
 static UA_INLINE UA_StatusCode
-UA_Server_readArrayDimensionsAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Int32 *outArrayDimensions) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_ARRAYDIMENSIONS, outArrayDimensions); }
-
-static UA_INLINE UA_StatusCode
-UA_Server_readAccessLevelAttribute(UA_Server *server, const UA_NodeId nodeId, UA_UInt32 *outAccessLevel) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_ACCESSLEVEL, outAccessLevel); }
+UA_Server_readArrayDimensions(UA_Server *server, const UA_NodeId nodeId, UA_Variant *outArrayDimensions) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_ARRAYDIMENSIONS, outArrayDimensions); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readMinimumSamplingIntervalAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Double *outMinimumSamplingInterval) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_MINIMUMSAMPLINGINTERVAL, outMinimumSamplingInterval); }
+UA_Server_readAccessLevel(UA_Server *server, const UA_NodeId nodeId, UA_UInt32 *outAccessLevel) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_ACCESSLEVEL, outAccessLevel); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readHistorizingAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outHistorizing) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_HISTORIZING, outHistorizing); }
+UA_Server_readMinimumSamplingInterval(UA_Server *server, const UA_NodeId nodeId, UA_Double *outMinimumSamplingInterval) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_MINIMUMSAMPLINGINTERVAL, outMinimumSamplingInterval); }
 
 static UA_INLINE UA_StatusCode
-UA_Server_readExecutableAttribute(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outExecutable) {
-    return __UA_Server_readAttribute(server, &nodeId, UA_ATTRIBUTEID_EXECUTABLE, outExecutable); }
+UA_Server_readHistorizing(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outHistorizing) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_HISTORIZING, outHistorizing); }
+
+static UA_INLINE UA_StatusCode
+UA_Server_readExecutable(UA_Server *server, const UA_NodeId nodeId, UA_Boolean *outExecutable) {
+    return __UA_Server_read(server, &nodeId, UA_ATTRIBUTEID_EXECUTABLE, outExecutable); }
+
+/****************/
+/* Browse Nodes */
+/****************/
+
+UA_BrowseResult UA_EXPORT UA_Server_browse(UA_Server *server, UA_UInt32 maxrefs, const UA_BrowseDescription *descr);
+UA_BrowseResult UA_Server_browseNext(UA_Server *server, UA_Boolean releaseContinuationPoint, const UA_ByteString *continuationPoint);
+
+/***************/
+/* Call Method */
+/***************/
+
+#ifdef UA_ENABLE_METHODCALLS
+UA_CallMethodResult UA_EXPORT UA_Server_call(UA_Server *server, const UA_CallMethodRequest *request);
+#endif
 
 #ifdef __cplusplus
 }
@@ -5000,7 +5047,7 @@ UA_Client_Service_call(UA_Client *client, const UA_CallRequest request) {
                         &response, &UA_TYPES[UA_TYPES_CALLRESPONSE]);
     return response; }
 
-#ifdef ENABLE_SUBSCRIPTIONS
+#ifdef UA_ENABLE_SUBSCRIPTIONS
 /* MonitoredItem Service Set */
 
 /**
@@ -5351,7 +5398,7 @@ UA_Client_call(UA_Client *client, const UA_NodeId objectId, const UA_NodeId meth
 /* Subscriptions Handling */
 /**************************/
 
-#ifdef ENABLE_SUBSCRIPTIONS
+#ifdef UA_ENABLE_SUBSCRIPTIONS
 
 typedef struct {
     UA_Double requestedPublishingInterval;

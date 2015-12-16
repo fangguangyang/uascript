@@ -4,6 +4,57 @@
 #include "lualib.h"
 #include "lauxlib.h"
 
+/* try to convert the element to a lua value */
+static void uatolua(lua_State *L, int index) {
+    ua_data *v = luaL_testudata(L, index, "open62541-data");
+    if(!v)
+        return;
+    switch(v->type->typeIndex) {
+    case UA_TYPES_BOOLEAN:
+        lua_pushboolean(L, *(UA_Boolean*)v->data);
+        break;
+    case UA_TYPES_SBYTE:
+        lua_pushinteger(L, *(UA_SByte*)v->data);
+        break;
+    case UA_TYPES_BYTE:
+        lua_pushinteger(L, *(UA_Byte*)v->data);
+        break;
+    case UA_TYPES_INT16:
+        lua_pushinteger(L, *(UA_Int16*)v->data);
+        break;
+    case UA_TYPES_UINT16:
+        lua_pushinteger(L, *(UA_UInt16*)v->data);
+        break;
+    case UA_TYPES_UINT32:
+        lua_pushinteger(L, *(UA_UInt32*)v->data);
+        break;
+    case UA_TYPES_INT32:
+    case UA_TYPES_STATUSCODE:
+        lua_pushinteger(L, *(UA_Int32*)v->data);
+        break;
+    case UA_TYPES_INT64:
+        lua_pushinteger(L, *(UA_Int64*)v->data);
+        break;
+    case UA_TYPES_UINT64:
+        lua_pushinteger(L, *(UA_UInt64*)v->data);
+        break;
+    case UA_TYPES_FLOAT:
+        lua_pushnumber(L, *(UA_Float*)v->data);
+        break;
+    case UA_TYPES_DOUBLE:
+        lua_pushnumber(L, *(UA_Double*)v->data);
+        break;
+    case UA_TYPES_STRING:
+    case UA_TYPES_BYTESTRING:
+    case UA_TYPES_XMLELEMENT:
+        lua_pushlstring(L, ((UA_String*)v->data)->data, ((UA_String*)v->data)->length);
+        break;
+    default:
+        return;
+    }
+    lua_replace(L, index);
+}
+
 /*****************/
 /* Type Handling */
 /*****************/
@@ -191,108 +242,6 @@ ua_type_parse(lua_State *L, const UA_DataType *type, int index) {
     return NULL;
 }
 
-/********************/
-/* Variant Handling */
-/********************/
-
-static int
-ua_variant_index(lua_State *L, UA_Variant *v, const char *key) {
-    if(strcmp(key, "value") == 0) {
-        if(UA_Variant_isScalar(v)) {
-            ua_data *data = lua_newuserdata(L, sizeof(ua_data));
-            data->type = v->type;
-            data->data = UA_new(v->type);
-            UA_copy(v->data, data->data, v->type);
-            luaL_setmetatable(L, "open62541-data");
-            return 1;
-        } else {
-            ua_array *array = lua_newuserdata(L, sizeof(ua_array));
-            array->type = v->type;
-            array->data = &array->local_data;
-            array->length = &array->local_length;
-            UA_Array_copy(v->data, v->arrayLength, &array->local_data, v->type);
-            array->local_length = v->arrayLength;
-            luaL_setmetatable(L, "open62541-array");
-            return 1;
-        }
-    } else if(strcmp(key, "arrayDimensions") == 0) {
-        ua_array *array = lua_newuserdata(L, sizeof(ua_array));
-        array->type = &UA_TYPES[UA_TYPES_UINT32];
-        array->data = &array->local_data;
-        array->length = &array->local_length;
-        UA_Array_copy(v->arrayDimensions, v->arrayDimensionsSize, &array->local_data, &UA_TYPES[UA_TYPES_UINT32]);
-        array->local_length = v->arrayDimensionsSize;
-        luaL_setmetatable(L, "open62541-array");
-        return 1;
-    }
-    return luaL_error(L, "Cannot get this Variant content");
-}
-
-static int
-ua_variant_newindex(lua_State *L, UA_Variant *v, const char *key, size_t index) {
-    if(strcmp(key, "value") == 0) {
-        ua_data *data = ua_getdata(L, index);
-        if(data) {
-            if(v->data > UA_EMPTY_ARRAY_SENTINEL && v->storageType == UA_VARIANT_DATA) {
-                if(UA_Variant_isScalar(v))
-                    UA_delete(v->data, v->type);
-                else
-                    UA_Array_delete(v->data, v->arrayLength, v->type);
-            }
-            UA_Variant_setScalarCopy(v, data->data, data->type);
-            return 0;
-        }
-        ua_array *array = ua_getarray(L, index);
-        if(array) {
-            if(v->data > UA_EMPTY_ARRAY_SENTINEL && v->storageType == UA_VARIANT_DATA) {
-                if(UA_Variant_isScalar(v))
-                    UA_delete(v->data, v->type);
-                else
-                    UA_Array_delete(v->data, v->arrayLength, v->type);
-            }
-            UA_Variant_setArrayCopy(v, *array->data, *array->length, array->type);
-            return 0;
-        }
-        return luaL_error(L, "Cannot set this data type to the variant");
-    } else if(strcmp(key, "arrayDimensions") == 0) {
-        ua_array *array = ua_getarray(L, index);
-        // allow int32 as most users will give a simple {1,2,3} lua array
-        if(array->type != &UA_TYPES[UA_TYPES_UINT32] &&
-           array->type != &UA_TYPES[UA_TYPES_INT32]) {
-            return luaL_error(L, "Array dimensions need to be an array of UInt32");
-        }
-        // todo: test if the dimensions match
-        UA_Array_delete(v->arrayDimensions, v->arrayDimensionsSize, &UA_TYPES[UA_TYPES_UINT32]);
-        UA_Array_copy(*array->data, *array->length, (void**)&v->arrayDimensions, &UA_TYPES[UA_TYPES_UINT32]);
-        v->arrayDimensionsSize = *array->length;
-        return 0;
-    }
-    return luaL_error(L, "Not a valid variant index");
-}
-
-/**********************/
-/* DataValue Handling */
-/**********************/
-
-static int
-ua_datavalue_index(lua_State *L, UA_DataValue *v, const char *key) {
-    if(strcmp(key, "value") == 0) {
-        if(!v->hasValue) {
-            lua_pushnil(L);
-            return 1;
-        }
-        UA_Variant *copy = UA_Variant_new();
-        UA_Variant_copy(&v->value, copy);
-        ua_data *data = lua_newuserdata(L, sizeof(ua_data));
-        data->type = &UA_TYPES[UA_TYPES_VARIANT];
-        data->data = copy;
-        luaL_setmetatable(L, "open62541-data");
-        return 1;
-    }
-    lua_pushnil(L);
-    return 1;
-}
-
 /* General type constructor function. Takes the datatype from its closure. */
 int ua_type_instantiate(lua_State *L) {
     lua_pushnil(L); // separator between data from the user and what we add
@@ -350,9 +299,16 @@ int ua_get_type(lua_State *L) {
     return 1;
 }
 
-/**************************/
-/* Type Instance Handling */
-/**************************/
+int ua_gc(lua_State *L) {
+    ua_data *data = ua_getdata(L, -1);
+    if(!data || !data->data)
+        return 0;
+    lua_getuservalue(L, -1);
+    /* derived data is not deleted, tagged with a uservalue */
+    if(lua_isnil(L, -1))
+        UA_delete(data->data, data->type);
+    return 0;
+}
 
 /* Read the data at the index in the lua stack, replace it with an open62541 data and return a pointer */
 ua_data *
@@ -447,44 +403,24 @@ ua_getarray(lua_State *L, int index) {
     return array;
 }
 
-
-static void
-push_lowercase(lua_State *L, const char *str) {
-    char out[512];
-    size_t i;
-    for(i = 0; i<512; i++) {
-        out[i] = tolower(str[i]);
-        if(!str[i])
-            break;
-    }
-    lua_pushlstring(L, out, i);
-}
+/*********/
+/* Index */
+/*********/
 
 /* Get the index of the member with the given name */
 static int
 find_memberindex(const UA_DataType *type, const char *membername) {
-    int memberindex;
-    int length = strlen(membername);
-    for(memberindex = 0; memberindex < type->membersSize; memberindex++) {
-        UA_Boolean found = UA_TRUE;
+    for(int memberindex = 0; memberindex < type->membersSize; memberindex++) {
         const UA_DataTypeMember *member = &type->members[memberindex];
         if(!member->memberName)
             continue;
-        if(strlen(member->memberName) != length)
-            continue;
-        for(size_t i = 0; i < length; i++) {
-            if(tolower(member->memberName[i]) != membername[i]) {
-                found = UA_FALSE;
-                break;
-            }
-        }
-        if(found)
+        if(strcmp(member->memberName, membername) == 0)
             return memberindex;
     }
     return -1;
 }
 
-/* get the pointer to the member and the array length if applicable */
+/* get the pointer to the member and the array length if an array */
 static void *
 memberptr(void *parent, const UA_DataType *type, int memberindex, size_t **arraylen) {
     uintptr_t ptr = (uintptr_t)parent;
@@ -508,36 +444,29 @@ memberptr(void *parent, const UA_DataType *type, int memberindex, size_t **array
     return (void*)ptr;
 }
 
-int ua_gc(lua_State *L) {
-    ua_data *data = ua_getdata(L, -1);
-    if(!data)
-        return 0;
-    lua_getuservalue(L, -1);
-    /* derived data is not deleted, tagged with a uservalue */
-    if(lua_isnil(L, -1))
-        UA_delete(data->data, data->type);
-    return 0;
+static int
+ua_return_member(lua_State *L, int dataindex,
+                 void *member, const UA_DataType *membertype) {
+    ua_data *memberdata = lua_newuserdata(L, sizeof(ua_data));
+    memberdata->type = membertype;
+    memberdata->data = member;
+    luaL_setmetatable(L, "open62541-data");
+    /* add a user value that prevents gc of the orig userdata */
+    lua_newtable(L);
+    lua_pushvalue(L, dataindex);
+    lua_rawseti(L, -2, 1);
+    lua_setuservalue(L, -2);
+    return 1;
 }
 
 static int
-ua_getmemberindex(lua_State *L, ua_data *data, int memberindex) {
-    size_t *arraylen;
-    void *member = memberptr(data->data, data->type, memberindex, &arraylen);
-    if(!arraylen) {
-        /* scalar type */
-        ua_data *memberdata = lua_newuserdata(L, sizeof(ua_data));
-        memberdata->type = &UA_TYPES[data->type->members[memberindex].memberTypeIndex];
-        memberdata->data = member;
-        luaL_setmetatable(L, "open62541-data");
-    } else {
-        /* array type */
-        ua_array *memberdata = lua_newuserdata(L, sizeof(ua_array));
-        memberdata->type = &UA_TYPES[data->type->members[memberindex].memberTypeIndex];
-        memberdata->data = (void**)member;
-        memberdata->length = arraylen;
-        luaL_setmetatable(L, "open62541-array");
-    }
-    
+ua_return_memberarray(lua_State *L, int dataindex, void *array,
+                      size_t *arraylen, const UA_DataType *arraytype) {
+    ua_array *memberdata = lua_newuserdata(L, sizeof(ua_array));
+    memberdata->type = arraytype;
+    memberdata->data = array;
+    memberdata->length = arraylen;
+    luaL_setmetatable(L, "open62541-array");
     /* add a user value that prevents gc of the orig userdata */
     lua_newtable(L);
     lua_pushvalue(L, 1); // orig userdata
@@ -546,21 +475,191 @@ ua_getmemberindex(lua_State *L, ua_data *data, int memberindex) {
     return 1;
 }
 
-int ua_index(lua_State *L) {
-    ua_data *data = luaL_checkudata (L, -2, "open62541-data");
-    if(!lua_isstring(L, -1))
-        return luaL_error(L, "Unknown index");
-    const char *key = lua_tostring(L, -1);
-    if(data->type == &UA_TYPES[UA_TYPES_VARIANT])
-        return ua_variant_index(L, data->data, key);
-    else if(data->type == &UA_TYPES[UA_TYPES_DATAVALUE])
-        return ua_datavalue_index(L, data->data, key);
-    int memberindex = find_memberindex(data->type, key);
-    if(memberindex < 0) {
-        lua_pushnil(L);
+static int
+ua_nodeid_index(lua_State *L, int dataindex, UA_NodeId *id, const char *key) {
+    if(strcmp(key, "namespaceIndex") == 0) {
+        return ua_return_member(L, dataindex, &id->namespaceIndex, &UA_TYPES[UA_TYPES_UINT16]);
+    }
+    if(strcmp(key, "identifier") == 0) {
+        if(id->identifierType == UA_NODEIDTYPE_NUMERIC)
+            return ua_return_member(L, dataindex, &id->identifier.numeric, &UA_TYPES[UA_TYPES_UINT32]);
+        else if(id->identifierType == UA_NODEIDTYPE_GUID)
+            return ua_return_member(L, dataindex, &id->identifier.guid, &UA_TYPES[UA_TYPES_GUID]);
+        return ua_return_member(L, dataindex, &id->identifier.string, &UA_TYPES[UA_TYPES_STRING]);
+    }
+    return luaL_error(L, "Cannot get this index");
+}
+
+static int
+ua_expandednodeid_index(lua_State *L, int dataindex, UA_ExpandedNodeId *id, const char *key) {
+    if(strcmp(key, "nodeId") == 0)
+        return ua_return_member(L, dataindex, &id->nodeId, &UA_TYPES[UA_TYPES_NODEID]);
+    if(strcmp(key, "namespaceUri") == 0)
+        return ua_return_member(L, dataindex, &id->namespaceUri, &UA_TYPES[UA_TYPES_STRING]);
+    if(strcmp(key, "serverIndex") == 0)
+        return ua_return_member(L, dataindex, &id->serverIndex, &UA_TYPES[UA_TYPES_UINT32]);
+    return luaL_error(L, "Cannot get this index");
+}
+
+/* access to variant always returns a copy */
+static int
+ua_variant_index(lua_State *L, int dataindex, UA_Variant *v, const char *key) {
+    if(strcmp(key, "value") == 0) {
+        if(UA_Variant_isScalar(v)) {
+            ua_data *data = lua_newuserdata(L, sizeof(ua_data));
+            data->type = v->type;
+            data->data = UA_new(v->type);
+            UA_copy(v->data, data->data, v->type);
+            luaL_setmetatable(L, "open62541-data");
+        } else {
+            ua_array *array = lua_newuserdata(L, sizeof(ua_array));
+            array->type = v->type;
+            array->data = &array->local_data;
+            array->length = &array->local_length;
+            UA_Array_copy(v->data, v->arrayLength, &array->local_data, v->type);
+            array->local_length = v->arrayLength;
+            luaL_setmetatable(L, "open62541-array");
+        }
         return 1;
     }
-    return ua_getmemberindex(L, data, memberindex);
+    if(strcmp(key, "arrayDimensions") == 0) {
+        ua_array *array = lua_newuserdata(L, sizeof(ua_array));
+        array->type = &UA_TYPES[UA_TYPES_UINT32];
+        array->data = &array->local_data;
+        array->length = &array->local_length;
+        UA_Array_copy(v->arrayDimensions, v->arrayDimensionsSize,
+                      &array->local_data, &UA_TYPES[UA_TYPES_UINT32]);
+        array->local_length = v->arrayDimensionsSize;
+        luaL_setmetatable(L, "open62541-array");
+        return 1;
+    }
+    return luaL_error(L, "Cannot get this index");
+}
+
+static int
+ua_datavalue_index(lua_State *L, int dataindex, UA_DataValue *v, const char *key) {
+    if(strcmp(key, "value") == 0) {
+        if(!v->hasValue) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &v->value, &UA_TYPES[UA_TYPES_VARIANT]);
+    }
+    if(strcmp(key, "status") == 0) {
+        if(!v->hasStatus) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &v->status, &UA_TYPES[UA_TYPES_STATUSCODE]);
+    }
+    if(strcmp(key, "sourceTimestamp") == 0) {
+        if(!v->hasSourceTimestamp) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &v->sourceTimestamp, &UA_TYPES[UA_TYPES_DATETIME]);
+    }
+    if(strcmp(key, "sourcePicoseconds") == 0) {
+        if(!v->hasSourcePicoseconds) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &v->sourcePicoseconds, &UA_TYPES[UA_TYPES_UINT16]);
+    }
+    if(strcmp(key, "serverTimestamp") == 0) {
+        if(!v->hasServerTimestamp) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &v->serverTimestamp, &UA_TYPES[UA_TYPES_DATETIME]);
+    }
+    if(strcmp(key, "serverPicoseconds") == 0) {
+        if(!v->hasServerPicoseconds) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &v->serverPicoseconds, &UA_TYPES[UA_TYPES_UINT16]);
+    }
+    return luaL_error(L, "Cannot get this index");
+}
+
+static int ua_index_key(lua_State *L, int dataindex, const char *key) {
+    ua_data *data = luaL_checkudata(L, dataindex, "open62541-data");
+
+    if(data->type == &UA_TYPES[UA_TYPES_NODEID])
+        return ua_nodeid_index(L, dataindex, data->data, key);
+    if(data->type == &UA_TYPES[UA_TYPES_EXPANDEDNODEID])
+        return ua_expandednodeid_index(L, dataindex, data->data, key);
+    else if(data->type == &UA_TYPES[UA_TYPES_VARIANT])
+        return ua_variant_index(L, dataindex, data->data, key);
+    else if(data->type == &UA_TYPES[UA_TYPES_DATAVALUE])
+        return ua_datavalue_index(L, dataindex, data->data, key);
+
+    int memberindex = find_memberindex(data->type, key);
+    if(memberindex < 0)
+        return luaL_error(L, "Cannot get this index %d", memberindex);
+
+    size_t *arraylen;
+    void *member = memberptr(data->data, data->type, memberindex, &arraylen);
+    const UA_DataType *type = &UA_TYPES[data->type->members[memberindex].memberTypeIndex];
+    if(arraylen)
+        return ua_return_memberarray(L, dataindex, member, arraylen, type);
+    return ua_return_member(L, dataindex, member, type);
+}
+
+int ua_index(lua_State *L) {
+    const char *key = lua_tostring(L, 2);
+    int ret = ua_index_key(L, 1, key);
+    if(ret == 0)
+        return 0;
+    uatolua(L, -1);
+    return 1;
+}
+
+/************/
+/* Newindex */
+/************/
+
+static int
+ua_variant_newindex(lua_State *L, UA_Variant *v, const char *key, int index) {
+    if(strcmp(key, "value") == 0) {
+        ua_data *data = ua_getdata(L, index);
+        if(data) {
+            if(v->data > UA_EMPTY_ARRAY_SENTINEL && v->storageType == UA_VARIANT_DATA) {
+                if(UA_Variant_isScalar(v))
+                    UA_delete(v->data, v->type);
+                else
+                    UA_Array_delete(v->data, v->arrayLength, v->type);
+            }
+            UA_Variant_setScalarCopy(v, data->data, data->type);
+            return 0;
+        }
+        ua_array *array = ua_getarray(L, index);
+        if(array) {
+            if(v->data > UA_EMPTY_ARRAY_SENTINEL && v->storageType == UA_VARIANT_DATA) {
+                if(UA_Variant_isScalar(v))
+                    UA_delete(v->data, v->type);
+                else
+                    UA_Array_delete(v->data, v->arrayLength, v->type);
+            }
+            UA_Variant_setArrayCopy(v, *array->data, *array->length, array->type);
+            return 0;
+        }
+        return luaL_error(L, "Cannot set this data type to the variant");
+    } else if(strcmp(key, "arrayDimensions") == 0) {
+        ua_array *array = ua_getarray(L, index);
+        // allow int32 as most users will give a simple {1,2,3} lua array
+        if(array->type != &UA_TYPES[UA_TYPES_UINT32] &&
+           array->type != &UA_TYPES[UA_TYPES_INT32]) {
+            return luaL_error(L, "Array dimensions need to be an array of UInt32");
+        }
+        // todo: test if the dimensions match
+        UA_Array_delete(v->arrayDimensions, v->arrayDimensionsSize, &UA_TYPES[UA_TYPES_UINT32]);
+        UA_Array_copy(*array->data, *array->length, (void**)&v->arrayDimensions, &UA_TYPES[UA_TYPES_UINT32]);
+        v->arrayDimensionsSize = *array->length;
+        return 0;
+    }
+    return luaL_error(L, "Not a valid variant index");
 }
 
 int ua_newindex(lua_State *L) {
@@ -629,36 +728,94 @@ int ua_newindex(lua_State *L) {
     return 0;
 }
 
-int ua_len(lua_State *L) {
-    ua_data *data = luaL_checkudata (L, 1, "open62541-data");
-    if(!data)
-        return luaL_error(L, "Cannot get the data");
-    lua_pushinteger(L, data->type->membersSize);
-    return 1;
-}
+/***********/
+/* Iterate */
+/***********/
+
+size_t nodeid_keysSize = 2;
+const char * nodeid_keys[] = {"namespaceIndex", "identifier"};
+
+size_t expandednodeid_keysSize = 3;
+const char * expandednodeid_keys[] = {"nodeId", "namespaceUri", "serverIndex"};
+
+size_t qualifiedname_keysSize = 2;
+const char * qualifiedname_keys[] = {"namespaceIndex", "name"};
+
+size_t localizedtext_keysSize = 2;
+const char * localizedtext_keys[] = {"locale", "text"};
+
+size_t variant_keysSize = 2;
+const char * variant_keys[] = {"value", "arrayDimensions"};
+
+size_t datavalue_keysSize = 6;
+const char * datavalue_keys[] = {"value", "status", "sourceTimestamp", "sourcePicoseconds",
+                                 "serverTimestamp", "serverPicoseconds"};
+
+size_t diagnosticinfo_keysSize = 7;
+const char *diagnosticinfo_keys[] = {"SymbolicId", "NamespaceUri", "LocalizedText", "Locale",
+                                     "AdditionalInfo", "InnerStatusCode", "InnerDiagnosticInfo" };
 
 static int
-ua_iterate(lua_State *L) {
-    ua_data *data = luaL_checkudata (L, 1, "open62541-data");
-    if(!data->type->builtin)
-        return 0;
+ua_iterate_builtin(lua_State *L, int dataindex, const char *key,
+                   const char * keys[], size_t keysSize) {
+    size_t i = 0;
+    if(key) {
+        for(; i<keysSize; i++) {
+            if(strcmp(key, keys[i]) == 0) {
+                break;
+            }
+        }
+        /* found nothing or the last entry */
+        if(i >= keysSize-1)
+            return 0;
+        i++; // the next index
+    }
+    lua_pushstring(L, keys[i]);
+    return 1 + ua_index_key(L, dataindex, keys[i]);
+}
+
+/* take (v, lastkey), return (key+1, v[key+1]) or return nothing */
+static int ua_iterate_atindex(lua_State *L, int dataindex) {
+    ua_data *data = luaL_checkudata (L, dataindex, "open62541-data");
+    const char *key = lua_tostring(L, dataindex+1);
+    
+    if(data->type == &UA_TYPES[UA_TYPES_NODEID])
+        return ua_iterate_builtin(L, dataindex, key, nodeid_keys, nodeid_keysSize);
+    else if(data->type == &UA_TYPES[UA_TYPES_EXPANDEDNODEID])
+        return ua_iterate_builtin(L, dataindex, key, expandednodeid_keys, expandednodeid_keysSize);
+    else if(data->type == &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])
+        return ua_iterate_builtin(L, dataindex, key, localizedtext_keys, localizedtext_keysSize);
+    else if(data->type == &UA_TYPES[UA_TYPES_VARIANT])
+        return ua_iterate_builtin(L, dataindex, key, variant_keys, variant_keysSize);
+    else if(data->type == &UA_TYPES[UA_TYPES_DATAVALUE])
+        return ua_iterate_builtin(L, dataindex, key, datavalue_keys, datavalue_keysSize);
+    
     int memberindex;
-    if(lua_isnil(L, 2))
+    if(!key) {
         memberindex = 0;
-    else if(lua_isstring(L, 2)) {
-        memberindex = find_memberindex(data->type, lua_tostring(L, 2));
+    } else {
+        memberindex = find_memberindex(data->type, key);
         if(memberindex < 0)
             return luaL_error(L, "No valid index");
         memberindex++;
-    } else
-       return luaL_error(L, "Can only iterate over string indices");
+    }
     if(memberindex >= data->type->membersSize)
         return 0;
-    push_lowercase(L, data->type->members[memberindex].memberName);
-    ua_getmemberindex(L, data, memberindex);
+
+    lua_pushstring(L, data->type->members[memberindex].memberName);
+    ua_index_key(L, dataindex, data->type->members[memberindex].memberName);
     return 2;
 }
-        
+
+static int ua_iterate(lua_State *L) {
+    int ret = ua_iterate_atindex(L, 1);
+    if(ret == 0)
+        return 0;
+    uatolua(L, -1);
+    return ret;
+}
+ 
+/* Returns (ua_iterate, v, firstkey = nil) */
 int ua_pairs(lua_State *L) {
     ua_data *data = luaL_checkudata (L, 1, "open62541-data");
     lua_pushcfunction(L, ua_iterate);
@@ -667,133 +824,57 @@ int ua_pairs(lua_State *L) {
     return 3;
 }
 
+/************/
+/* ToString */
+/************/
 
-static int ua_tostring_builtin(lua_State *L, const UA_DataType *type, void *data, size_t level);
-static int ua_tostring_structured(lua_State *L, const UA_DataType *type, void *data, size_t level);
-static int ua_tostring_array(lua_State *L, const UA_DataType *type, void *data, size_t len, size_t level);
+static int ua_tostring_level(lua_State *L, size_t level);
+static int ua_array_tostring_level(lua_State *L, size_t level);
 
+/* use iterate over members. the data is at -1 */
 static int
-ua_tostring_variant(lua_State *L, const UA_Variant *v, size_t level) {
-    int pushed = 1; 
-    lua_pushstring(L, "ua.types.Variant:\n");
-
-    for(size_t j = 0; j < level; j++)
-        lua_pushstring(L, "  ");
-    pushed += level;
-
-    lua_pushstring(L, "value = ");
-    pushed++;
-    if(!v->type) {
-        lua_pushstring(L, "nil");
-        pushed++;
-    } else if(UA_Variant_isScalar(v)) {
-        if(v->type->builtin)
-            pushed += ua_tostring_builtin(L, v->type, v->data, level+1);
-        else
-            pushed += ua_tostring_structured(L, v->type, v->data, level+1);
-    } else
-        pushed += ua_tostring_array(L, v->type, v->data, v->arrayLength, level+1);
-
-    lua_pushstring(L, "\n");
-    for(size_t j = 0; j < level; j++)
-        lua_pushstring(L, "  ");
-    lua_pushstring(L, "arrayDimensions = ");
-    pushed += 2 + level + ua_tostring_array(L, &UA_TYPES[UA_TYPES_UINT32], v->arrayDimensions, v->arrayDimensionsSize, level+1);
-    lua_concat(L, pushed);
-    return 1;
-}
-
-static int
-ua_tostring_datavalue(lua_State *L, const UA_DataValue *v, size_t level) {
-    int pushed = 0; 
-    if(v->hasValue) {
-        for(size_t j = 0; j < level; j++)
-            lua_pushstring(L, "  ");
-        lua_pushstring(L, "value = ");
-        pushed += level + 1 + ua_tostring_variant(L, &v->value, level+1);
-    } else {
-        for(size_t j = 0; j < level; j++)
-            lua_pushstring(L, "  ");
-        lua_pushstring(L, "value = nil");
-        pushed += level + 1;
-    }
-    lua_concat(L, pushed);
-    pushed = 1;
-
-    /* if(v->hasStatus) { */
-
-    /* } */
-
-    return pushed;
-}
-
-static int
-ua_tostring_array(lua_State *L, const UA_DataType *type, void *data, size_t len, size_t level) {
+ua_tostring_structured(lua_State *L, size_t level) {
+    ua_data *d = luaL_testudata(L, -1, "open62541-data");
+    lua_pushnil(L);
+    int k_index = lua_gettop(L);
+    lua_pushfstring(L, "ua.types.%s:", d->type->typeName);
     int pushed = 1;
-    if(len > 0)
-        lua_pushfstring(L, "ua.Array(ua.types.%s,%d):\n", type->typeName, (int)len);
-    else {
-        if(data > 0)
-            lua_pushfstring(L, "ua.Array(ua.types.%s,0):", type->typeName);
-        else
-            lua_pushfstring(L, "ua.Array(ua.types.%s,-1):", type->typeName);
-    }
-    uintptr_t p = (uintptr_t)data;
-    for(int i = 0; i < len; i++) {
-        for(size_t j = 0; j < level; j++)
-            lua_pushstring(L, "  ");
-        pushed += level;
-        lua_pushfstring(L, "%d = ", i+1);
-        pushed += 1;
-        if(type->builtin)
-            pushed += ua_tostring_builtin(L, type, (void*)p, level+1);
-        else
-            pushed += ua_tostring_structured(L, type, (void*)p, level+1);
-        p += type->memSize;
-        if(i + 1 < len) {
-            lua_pushstring(L, "\n");
-            pushed++;
-        }
-        lua_concat(L, pushed);
-        pushed = 1;
-    }
-    return 1;
-}
+    while(true) {
+        int ret = ua_iterate_atindex(L, k_index-1);
+        if(ret == 0)
+            break;
+        lua_insert(L, -2); // move the key to the top
+        lua_replace(L, k_index);
+        int v_index = lua_gettop(L);
 
-static int
-ua_tostring_structured(lua_State *L, const UA_DataType *type, void *data, size_t level) {
-    int pushed = 1;
-    lua_pushfstring(L, "ua.types.%s:\n", type->typeName);
-    for(size_t i = 0; i < type->membersSize; i++) {
+        lua_pushstring(L, "\n");
         for(size_t j = 0; j < level; j++)
             lua_pushstring(L, "  ");
-        pushed += level;
-        const UA_DataTypeMember *member = &type->members[i];
-        const UA_DataType *typelists[2] = { UA_TYPES, &type[-type->typeIndex] };
-        const UA_DataType *memberType = &typelists[!member->namespaceZero][member->memberTypeIndex];
-        size_t *arraylen;
-        void *memberp = memberptr(data, type, i, &arraylen);
-        push_lowercase(L, member->memberName);
+        lua_pushvalue(L, k_index);
         lua_pushstring(L, " = ");
-        pushed += 2;
-        if(arraylen)
-            pushed += ua_tostring_array(L, memberType, *(void**)memberp, *arraylen, level+1);
-        else if(memberType->builtin)
-            pushed += ua_tostring_builtin(L, memberType, memberp, level+1);
+        pushed += level + 3;
+
+        lua_pushvalue(L, v_index);
+        lua_remove(L, v_index);
+        v_index = lua_gettop(L);
+        if(luaL_testudata(L, -1, "open62541-data"))
+            pushed += ua_tostring_level(L, level+1);
         else
-            pushed += ua_tostring_structured(L, memberType, memberp, level+1);
-        if(i + 1 < type->membersSize) {
-            lua_pushstring(L, "\n");
-            pushed++;
-        }
+            pushed += ua_array_tostring_level(L, level+1);
+        lua_remove(L, v_index);
         lua_concat(L, pushed);
         pushed = 1;
     }
+    lua_remove(L, k_index);
     return 1;
 }
 
 static int
-ua_tostring_builtin(lua_State *L, const UA_DataType *type, void *data, size_t level) {
+ua_tostring_level(lua_State *L, size_t level) {
+    ua_data *d = luaL_testudata(L, -1, "open62541-data");
+    void *data = d->data;
+    const UA_DataType *type = d->type;
+
     char out[37];
     switch(type->typeIndex) {
     case UA_TYPES_BOOLEAN:
@@ -878,58 +959,77 @@ ua_tostring_builtin(lua_State *L, const UA_DataType *type, void *data, size_t le
                 lua_pushstring(L, "\"");
                 lua_pushlstring(L, s->data, s->length);
                 lua_pushstring(L, "\"");
-                return 3;
+                lua_concat(L, 3);
+                return 1;
             }
         }
     }
-    case UA_TYPES_NODEID: {
-        const UA_NodeId *id = (const UA_NodeId*)data;
-        if(id->identifierType == UA_NODEIDTYPE_NUMERIC)
-            lua_pushfstring(L, "NodeId(ns=%d,i=%d)", id->namespaceIndex, id->identifier.numeric);
-        else if(id->identifierType == UA_NODEIDTYPE_STRING) {
-            char out[512];
-            snprintf(out, 512, "NodeId(ns=%i,s=%.*s)", id->namespaceIndex,
-                     id->identifier.string.length, id->identifier.string.data);
-            lua_pushstring(L, out);
-        } else
-            lua_pushstring(L, "NodeId(unknown)");
-        return 1;
-    }
-    case UA_TYPES_QUALIFIEDNAME:
-    case UA_TYPES_LOCALIZEDTEXT:
-    case UA_TYPES_EXPANDEDNODEID:
-        return ua_tostring_structured(L, type, data, level);
-    case UA_TYPES_VARIANT:
-        return ua_tostring_variant(L, data, level);
-    case UA_TYPES_DATAVALUE:
-        return ua_tostring_datavalue(L, data, level);
-    default:
+    case UA_TYPES_EXTENSIONOBJECT:
         lua_pushfstring(L, "ua.types.%s", type->typeName);
         return 1;
+    case UA_TYPES_EXPANDEDNODEID:
+    case UA_TYPES_LOCALIZEDTEXT:
+    case UA_TYPES_DIAGNOSTICINFO:
+    case UA_TYPES_QUALIFIEDNAME:
+    case UA_TYPES_NODEID:
+    case UA_TYPES_VARIANT:
+    case UA_TYPES_DATAVALUE:
+    default:
+        return ua_tostring_structured(L, level);
     }
-    return 1;
+    return luaL_error(L, "Cannot convert the value to a string");
 }
 
 int ua_tostring(lua_State *L) {
-    ua_data *data = luaL_checkudata (L, -1, "open62541-data");
-    if(!data)
-        return luaL_error(L, "Cannot print this value");
-    if(data->type->builtin)
-        return ua_tostring_builtin(L, data->type, data->data, 0);
-    int pushed = ua_tostring_structured(L, data->type, data->data, 0);
-    lua_concat(L, pushed);
-    return 1;
+    return ua_tostring_level(L, 0);
 }
 
 /******************/
 /* Array Handling */
 /******************/
 
-int ua_array_tostring(lua_State *L) {
+static int
+ua_array_tostring_level(lua_State *L, size_t level) {
     ua_array *array = luaL_checkudata (L, -1, "open62541-array");
-    if(!array)
-        return luaL_error(L, "Cannot print this value");
-    return ua_tostring_array(L, array->type, *array->data, *array->length, 0);
+    size_t len = *array->length;
+    const UA_DataType *type = array->type;
+    
+    int pushed = 1;
+    if(len > 0)
+        lua_pushfstring(L, "ua.Array(ua.types.%s,%d):", type->typeName, (int)len);
+    else {
+        if(*array->data > NULL)
+            lua_pushfstring(L, "ua.Array(ua.types.%s,0):", type->typeName);
+        else
+            lua_pushfstring(L, "ua.Array(ua.types.%s,-1):", type->typeName);
+    }
+    uintptr_t p = (uintptr_t)*array->data;
+    for(int i = 0; i < len; i++) {
+        lua_pushstring(L, "\n");
+        for(size_t j = 0; j < level; j++)
+            lua_pushstring(L, "  ");
+        lua_pushfstring(L, "%d = ", i+1);
+        pushed += level + 2;
+
+        /* fake data element */
+        ua_data *data = lua_newuserdata(L, sizeof(ua_data));
+        data->type = type;
+        data->data = (void*)p;
+        luaL_setmetatable(L, "open62541-data");
+        int vi = lua_gettop(L);
+        pushed += ua_tostring_level(L, level+1);
+        data->data = NULL;
+        lua_remove(L, vi);
+
+        p += type->memSize;
+        lua_concat(L, pushed);
+        pushed = 1;
+    }
+    return 1;
+}
+
+int ua_array_tostring(lua_State *L) {
+    return ua_array_tostring_level(L, 0);
 }
 
 int ua_array_new(lua_State *L) {
@@ -960,15 +1060,64 @@ int ua_array_new(lua_State *L) {
 
 int ua_array_index(lua_State *L) {
     ua_array *array = luaL_checkudata (L, 1, "open62541-array");
+    if(!lua_isnumber(L, 2))
+        return luaL_error(L, "Arrays can only be indexed numerically");
     int index = lua_tointeger(L, 2);
     index--; // lua is 1-indexed
     if(index < 0 || index >= *array->length)
-        return luaL_error(L, "Index out of range");
+        return 0;
+	uintptr_t ptr = (uintptr_t)*array->data;
+    ptr += index * array->type->memSize;
+
+    /* convert to a native type */
+    switch(array->type->typeIndex) {
+    case UA_TYPES_BOOLEAN:
+        lua_pushboolean(L, *(UA_Boolean*)ptr);
+        return 1;
+    case UA_TYPES_SBYTE:
+        lua_pushinteger(L, *(UA_SByte*)ptr);
+        return 1;
+    case UA_TYPES_BYTE:
+        lua_pushinteger(L, *(UA_Byte*)ptr);
+        return 1;
+    case UA_TYPES_INT16:
+        lua_pushinteger(L, *(UA_Int16*)ptr);
+        return 1;
+    case UA_TYPES_UINT16:
+        lua_pushinteger(L, *(UA_UInt16*)ptr);
+        return 1;
+    case UA_TYPES_UINT32:
+        lua_pushinteger(L, *(UA_UInt32*)ptr);
+        return 1;
+    case UA_TYPES_INT32:
+    case UA_TYPES_STATUSCODE:
+        lua_pushinteger(L, *(UA_Int32*)ptr);
+        return 1;
+    case UA_TYPES_INT64:
+        lua_pushinteger(L, *(UA_Int64*)ptr);
+        return 1;
+    case UA_TYPES_UINT64:
+        lua_pushinteger(L, *(UA_UInt64*)ptr);
+        return 1;
+    case UA_TYPES_FLOAT:
+        lua_pushnumber(L, *(UA_Float*)ptr);
+        return 1;
+    case UA_TYPES_DOUBLE:
+        lua_pushnumber(L, *(UA_Double*)ptr);
+        return 1;
+    case UA_TYPES_STRING:
+    case UA_TYPES_BYTESTRING:
+    case UA_TYPES_XMLELEMENT:
+        lua_pushlstring(L, ((UA_String*)ptr)->data, ((UA_String*)ptr)->length);
+        return 1;
+    default:
+        break;
+    }
+
+    /* return a copy */
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
     data->type = array->type;
     data->data = UA_new(array->type);
-	uintptr_t ptr = (uintptr_t)*array->data;
-    ptr += index * array->type->memSize;
     UA_copy((void*)ptr, data->data, array->type);
     luaL_setmetatable(L, "open62541-data");
     return 1;
@@ -995,12 +1144,13 @@ int ua_array_newindex(lua_State *L) {
         uintptr_t arr = (uintptr_t)*array->data;
         UA_deleteMembers((void*)(arr + (array->type->memSize*index)), array->type);
         for(size_t i = index+1; i < *array->length; i++)
-            memcpy((void*)(arr + (array->type->memSize*(i-1))), (void*)(arr + (array->type->memSize*i)), array->type->memSize);
+            memcpy((void*)(arr + (array->type->memSize*(i-1))),
+                   (void*)(arr + (array->type->memSize*i)), array->type->memSize);
         *array->length -= 1;
         return 0;
     }
 
-    ua_data *data = luaL_checkudata(L, 3, "open62541-data");
+    ua_data *data = ua_getdata(L, 3);
     if(!data || data->type != array->type)
         return luaL_error(L, "The value is of the wrong type");
 
@@ -1041,13 +1191,9 @@ ua_array_iterate(lua_State *L) {
     ua_array *array = luaL_checkudata (L, 1, "open62541-array");
     if(!array)
         return luaL_error(L, "Not a open62541 datatype");
-    int index;
-    if(lua_isnil(L, 2))
-        index = 0;
-    else if(lua_isnumber(L, 2))
-        index = lua_tonumber(L, 2);
-    else
+    if(!lua_isnumber(L, 2))
         return luaL_error(L, "Can only iterate over numeric indices");
+    int index = lua_tonumber(L, 2);
     if(index < 0 || index >= *array->length)
         return 0;
     lua_pushnumber(L, index+1);
@@ -1067,6 +1213,6 @@ int ua_array_pairs(lua_State *L) {
         return luaL_error(L, "Not a open62541 datatype");
     lua_pushcfunction(L, ua_array_iterate);
     lua_pushvalue(L, 1);
-    lua_pushnil(L);
+    lua_pushinteger(L, 0);
     return 3;
 }
