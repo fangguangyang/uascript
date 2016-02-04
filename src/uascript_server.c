@@ -14,6 +14,7 @@
 struct ua_background_server {
     UA_Boolean running;
     UA_Boolean gc;
+    UA_ServerNetworkLayer nl;
     UA_Server *server;
 #ifndef _WIN32
     pthread_t thread;
@@ -23,7 +24,7 @@ struct ua_background_server {
 };
 
 static void * run_server(struct ua_background_server *s) {
-    UA_Server_run(s->server, 1, &s->running);
+    UA_Server_run(s->server, &s->running);
     return NULL;
 }
 
@@ -34,22 +35,24 @@ int ua_server_new(lua_State *L) {
     struct ua_background_server *server = lua_newuserdata(L, sizeof(struct ua_background_server));
     server->running = UA_FALSE;
     server->gc = UA_TRUE;
-    server->server = UA_Server_new(UA_ServerConfig_standard);
+    server->nl = UA_ServerNetworkLayerTCP(UA_ConnectionConfig_standard, port);
+    UA_ServerConfig config = UA_ServerConfig_standard;
+    config.logger = Logger_Stdout;
+    config.networkLayers = &server->nl;
+    config.networkLayersSize = 1;
+    server->server = UA_Server_new(config);
 #ifndef _WIN32
     server->thread = pthread_self();
 #else
     server->thread = 0;
 #endif
-    UA_Server_setLogger(server->server, Logger_Stdout);
-    UA_ServerNetworkLayer *nl;
-    nl = ServerNetworkLayerTCP_new(UA_ConnectionConfig_standard, port);
-    UA_Server_addNetworkLayer(server->server, nl);
     luaL_setmetatable(L, "open62541-server");
     return 1;
 }
 
 int ua_server_gc(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, -1, "open62541-server");
+    server->nl.deleteMembers(&server->nl);
     if(server->gc)
         UA_Server_delete(server->server);
     return 0;
@@ -92,30 +95,18 @@ int ua_server_add_variablenode(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, 1, "open62541-server");
     if(!server)
         return luaL_error(L, "function must be called on a server");
-    ua_data *requestedNewNodeId = ua_getdata(L, 2);
-    if(!requestedNewNodeId || requestedNewNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "1st argument (requestednewnodeid) is not of nodeid type");
-    ua_data *parentNodeId = ua_getdata(L, 3);
-    if(!parentNodeId || parentNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "2nd argument (parentnodeid) is not of nodeid type");
-    ua_data *referenceTypeId = ua_getdata(L, 4);
-    if(!referenceTypeId || referenceTypeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "3th argument (referenceTypeId) is not of nodeid type");
-    ua_data *browseName = ua_getdata(L, 5);
-    if(!browseName || browseName->type != &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
-        return luaL_error(L, "4th argument (browsename) is not of qualifiedname type");
-    ua_data *typeDefinition = ua_getdata(L, 6);
-    if(!typeDefinition || typeDefinition->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "5th argument (typeDefinition) is not of nodeid type");
-    ua_data *attr = ua_getdata(L, 7);
-    if(!attr || attr->type != &UA_TYPES[UA_TYPES_VARIABLEATTRIBUTES])
-        return luaL_error(L, "6th argument (variableattributes) is not of variableattributes type");
+    ua_data *requestedNewNodeId = ua_getdata(L, 2, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *parentNodeId = ua_getdata(L, 3, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *referenceTypeId = ua_getdata(L, 4, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *browseName = ua_getdata(L, 5, &UA_TYPES[UA_TYPES_QUALIFIEDNAME]);
+    ua_data *typeDefinition = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *attr = ua_getdata(L, 7, &UA_TYPES[UA_TYPES_VARIABLEATTRIBUTES]);
     UA_NodeId result;
     UA_StatusCode retval =
         UA_Server_addVariableNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
                                   *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
                                   *(UA_QualifiedName*)browseName->data, *(UA_NodeId*)typeDefinition->data,
-                                  *(UA_VariableAttributes*)attr->data, &result);
+                                  *(UA_VariableAttributes*)attr->data, NULL, &result);
     if(retval != UA_STATUSCODE_GOOD)
         return luaL_error(L, "Statuscode is %f", retval);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
@@ -130,30 +121,18 @@ int ua_server_add_objectnode(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, 1, "open62541-server");
     if(!server)
         return luaL_error(L, "function must be called on a server");
-    ua_data *requestedNewNodeId = ua_getdata(L, 2);
-    if(!requestedNewNodeId || requestedNewNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "1st argument (requestednewnodeid) is not of nodeid type");
-    ua_data *parentNodeId = ua_getdata(L, 3);
-    if(!parentNodeId || parentNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "2nd argument (parentnodeid) is not of nodeid type");
-    ua_data *referenceTypeId = ua_getdata(L, 4);
-    if(!referenceTypeId || referenceTypeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "3th argument (referenceTypeId) is not of nodeid type");
-    ua_data *browseName = ua_getdata(L, 5);
-    if(!browseName || browseName->type != &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
-        return luaL_error(L, "4th argument (browsename) is not of qualifiedname type");
-    ua_data *typeDefinition = ua_getdata(L, 6);
-    if(!typeDefinition || typeDefinition->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "5th argument (typeDefinition) is not of nodeid type");
-    ua_data *attr = ua_getdata(L, 7);
-    if(!attr || attr->type != &UA_TYPES[UA_TYPES_OBJECTATTRIBUTES])
-        return luaL_error(L, "6th argument is not of objectattributes type");
+    ua_data *requestedNewNodeId = ua_getdata(L, 2, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *parentNodeId = ua_getdata(L, 3, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *referenceTypeId = ua_getdata(L, 4, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *browseName = ua_getdata(L, 5, &UA_TYPES[UA_TYPES_QUALIFIEDNAME]);
+    ua_data *typeDefinition = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *attr = ua_getdata(L, 7, &UA_TYPES[UA_TYPES_OBJECTATTRIBUTES]);
     UA_NodeId result;
     UA_StatusCode retval =
         UA_Server_addObjectNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
                                 *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
                                 *(UA_QualifiedName*)browseName->data, *(UA_NodeId*)typeDefinition->data,
-                                *(UA_ObjectAttributes*)attr->data, &result);
+                                *(UA_ObjectAttributes*)attr->data, NULL, &result);
     if(retval != UA_STATUSCODE_GOOD)
         return luaL_error(L, "Statuscode is %f", retval);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
@@ -168,27 +147,17 @@ int ua_server_add_objecttypenode(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, 1, "open62541-server");
     if(!server)
         return luaL_error(L, "function must be called on a server");
-    ua_data *requestedNewNodeId = ua_getdata(L, 2);
-    if(!requestedNewNodeId || !requestedNewNodeId || requestedNewNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "1st argument (requestednewnodeid) is not of nodeid type");
-    ua_data *parentNodeId = ua_getdata(L, 3);
-    if(!parentNodeId || parentNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "2nd argument (parentnodeid) is not of nodeid type");
-    ua_data *referenceTypeId = ua_getdata(L, 4);
-    if(!referenceTypeId || referenceTypeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "3th argument (referenceTypeId) is not of nodeid type");
-    ua_data *browseName = ua_getdata(L, 5);
-    if(!browseName || browseName->type != &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
-        return luaL_error(L, "4th argument (browsename) is not of qualifiedname type");
-    ua_data *attr = ua_getdata(L, 6);
-    if(!attr || attr->type != &UA_TYPES[UA_TYPES_OBJECTTYPEATTRIBUTES])
-        return luaL_error(L, "5th argument is not of objecttypeattributes type");
+    ua_data *requestedNewNodeId = ua_getdata(L, 2, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *parentNodeId = ua_getdata(L, 3, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *referenceTypeId = ua_getdata(L, 4, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *browseName = ua_getdata(L, 5, &UA_TYPES[UA_TYPES_QUALIFIEDNAME]);
+    ua_data *attr = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_OBJECTTYPEATTRIBUTES]);
     UA_NodeId result;
     UA_StatusCode retval =
         UA_Server_addObjectTypeNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
                                     *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
                                     *(UA_QualifiedName*)browseName->data,
-                                    *(UA_ObjectTypeAttributes*)attr->data, &result);
+                                    *(UA_ObjectTypeAttributes*)attr->data, NULL, &result);
     if(retval != UA_STATUSCODE_GOOD)
         return luaL_error(L, "Statuscode is %f", retval);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
@@ -203,27 +172,17 @@ int ua_server_add_referencetypenode(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, 1, "open62541-server");
     if(!server)
         return luaL_error(L, "function must be called on a server");
-    ua_data *requestedNewNodeId = ua_getdata(L, 2);
-    if(!requestedNewNodeId || requestedNewNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "1st argument (requestednewnodeid) is not of nodeid type");
-    ua_data *parentNodeId = ua_getdata(L, 3);
-    if(!parentNodeId || parentNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "2nd argument (parentnodeid) is not of nodeid type");
-    ua_data *referenceTypeId = ua_getdata(L, 4);
-    if(!referenceTypeId || referenceTypeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "3th argument (referenceTypeId) is not of nodeid type");
-    ua_data *browseName = ua_getdata(L, 5);
-    if(!browseName || browseName->type != &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
-        return luaL_error(L, "4th argument (browsename) is not of qualifiedname type");
-    ua_data *attr = ua_getdata(L, 6);
-    if(!attr || attr->type != &UA_TYPES[UA_TYPES_REFERENCETYPEATTRIBUTES])
-        return luaL_error(L, "5th argument is not of referencetypeattributes type");
+    ua_data *requestedNewNodeId = ua_getdata(L, 2, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *parentNodeId = ua_getdata(L, 3, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *referenceTypeId = ua_getdata(L, 4, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *browseName = ua_getdata(L, 5, &UA_TYPES[UA_TYPES_QUALIFIEDNAME]);
+    ua_data *attr = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_REFERENCETYPEATTRIBUTES]);
     UA_NodeId result;
     UA_StatusCode retval =
         UA_Server_addReferenceTypeNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
                                        *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
                                        *(UA_QualifiedName*)browseName->data,
-                                       *(UA_ReferenceTypeAttributes*)attr->data, &result);
+                                       *(UA_ReferenceTypeAttributes*)attr->data, NULL, &result);
     if(retval != UA_STATUSCODE_GOOD)
         return luaL_error(L, "Statuscode is %f", retval);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
@@ -270,7 +229,7 @@ ua_server_methodcallback(void *methodHandle, const UA_NodeId objectId,
     }
 
     for(size_t j = 0; j < outputSize; j++) {
-        ua_data *out = ua_getdata(L, -outputSize-1);
+        ua_data *out = ua_getdata(L, -outputSize-1, NULL);
         if(out) {
             if(out->type == &UA_TYPES[UA_TYPES_VARIANT])
                 UA_Variant_copy(out->data, &output[j]);
@@ -292,21 +251,11 @@ ua_server_methodcallback(void *methodHandle, const UA_NodeId objectId,
 
 int ua_server_add_methodnode(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, 1, "open62541-server");
-    ua_data *requestedNewNodeId = ua_getdata(L, 2);
-    if(!requestedNewNodeId || requestedNewNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "1st argument (requestednewnodeid) is not of nodeid type");
-    ua_data *parentNodeId = ua_getdata(L, 3);
-    if(!parentNodeId || parentNodeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "2nd argument (parentnodeid) is not of nodeid type");
-    ua_data *referenceTypeId = ua_getdata(L, 4);
-    if(!referenceTypeId || referenceTypeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "3th argument (referenceTypeId) is not of nodeid type");
-    ua_data *browseName = ua_getdata(L, 5);
-    if(!browseName || browseName->type != &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
-        return luaL_error(L, "4th argument (browsename) is not of qualifiedname type");
-    ua_data *attr = ua_getdata(L, 6);
-    if(!attr || attr->type != &UA_TYPES[UA_TYPES_METHODATTRIBUTES])
-        return luaL_error(L, "5th argument (methodattributes) is not of methodattributes type");
+    ua_data *requestedNewNodeId = ua_getdata(L, 2, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *parentNodeId = ua_getdata(L, 3, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *referenceTypeId = ua_getdata(L, 4, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *browseName = ua_getdata(L, 5, &UA_TYPES[UA_TYPES_QUALIFIEDNAME]);
+    ua_data *attr = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_METHODATTRIBUTES]);
     if(!lua_isfunction(L, 7))
         return luaL_error(L, "6th argument (method) is not of function type");
     ua_array *input = luaL_checkudata(L, 8, "open62541-array");
@@ -348,19 +297,13 @@ int ua_server_add_reference(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, 1, "open62541-server");
     if(!server)
         return luaL_error(L, "function must be called on a server");
-    ua_data *sourceId = ua_getdata(L, 2);
-    if(!sourceId || sourceId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "1st argument (sourceid) is not of nodeid type");
-    ua_data *refTypeId = ua_getdata(L, 3);
-    if(!refTypeId || refTypeId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "2nd argument (reftypeid) is not of nodeid type");
-    ua_data *targetId = ua_getdata(L, 4);
+    ua_data *sourceId = ua_getdata(L, 2, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *refTypeId = ua_getdata(L, 3, &UA_TYPES[UA_TYPES_NODEID]);
+    ua_data *targetId = ua_getdata(L, 4, NULL);
     if(!targetId || (targetId->type != &UA_TYPES[UA_TYPES_EXPANDEDNODEID] &&
                      targetId->type != &UA_TYPES[UA_TYPES_NODEID]))
         return luaL_error(L, "3rd argument (targetid) is not of nodeid or expandednodeid type");
-    ua_data *isForward = ua_getdata(L, 5);
-    if(!isForward || isForward->type != &UA_TYPES[UA_TYPES_BOOLEAN])
-        return luaL_error(L, "4th argument (isforward) is not of boolean type");
+    ua_data *isForward = ua_getdata(L, 5, &UA_TYPES[UA_TYPES_BOOLEAN]);
 
     UA_ExpandedNodeId target;
     UA_ExpandedNodeId_init(&target);
@@ -386,17 +329,12 @@ int ua_server_write(lua_State *L) {
     if(!server)
         return luaL_error(L, "function must be called on a server");
 
-    ua_data *sourceId = ua_getdata(L, 2);
-    if(!sourceId || sourceId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "1st argument (sourceid) is not of nodeid type");
-
+    ua_data *sourceId = ua_getdata(L, 2, &UA_TYPES[UA_TYPES_NODEID]);
     if(!lua_isnumber(L, 3))
         return luaL_error(L, "2nd argument (attributeid) is not a number");
     lua_Number attrId = lua_tonumber(L, 3);
 
-    ua_data *value = ua_getdata(L, 4);
-    if(!value)
-        return luaL_error(L, "4th argument cannot be converted to ua data");
+    ua_data *value = ua_getdata(L, 4, NULL);
 
     UA_StatusCode retval;
     if(attrId != UA_ATTRIBUTEID_VALUE) {
@@ -422,9 +360,7 @@ int ua_server_read(lua_State *L) {
     if(!server)
         return luaL_error(L, "function must be called on a server");
 
-    ua_data *sourceId = ua_getdata(L, 2);
-    if(!sourceId || sourceId->type != &UA_TYPES[UA_TYPES_NODEID])
-        return luaL_error(L, "1st argument (sourceid) is not of nodeid type");
+    ua_data *sourceId = ua_getdata(L, 2, &UA_TYPES[UA_TYPES_NODEID]);
 
     if(!lua_isnumber(L, 3))
         return luaL_error(L, "2nd argument (attributeid) is not a number");

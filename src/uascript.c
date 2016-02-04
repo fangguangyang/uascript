@@ -34,6 +34,7 @@ static const struct luaL_Reg uascript_module [] = {
     {"Array", ua_array_new},
     {"Server", ua_server_new},
     {"Client", ua_client_new},
+    {"GetEndpoints", ua_client_getendpoints},
     {NULL, NULL} /* sentinel */
 };
 
@@ -51,6 +52,11 @@ static void addAttributeId(lua_State *L, int identifier, const char *name) {
     lua_setfield(L, -2, name);
 }
 
+static int ua_indexerr(lua_State *L) {
+    return luaL_error(L, "Type cannot be indexed");
+}
+
+
 int luaopen_uascript(lua_State *L) {
     /* metatable for data types */
     luaL_newmetatable(L, "open62541-type");
@@ -58,9 +64,9 @@ int luaopen_uascript(lua_State *L) {
     lua_setfield(L, -2, "__tostring");
     lua_pushcfunction(L, ua_type_instantiate);
     lua_setfield(L, -2, "__call");
-    lua_pushcfunction(L, ua_type_indexerr);
+    lua_pushcfunction(L, ua_indexerr);
     lua_setfield(L, -2, "__index");
-    lua_pushcfunction(L, ua_type_indexerr);
+    lua_pushcfunction(L, ua_indexerr);
     lua_setfield(L, -2, "__newindex");
     lua_pop(L, 1);
     

@@ -28,10 +28,35 @@ int ua_client_connect(lua_State *L) {
         return luaL_error(L, "Not a client object");
     if(!lua_isstring(L, 2))
         return luaL_error(L, "Supply a connection string of the form opc.tcp://url:port");
-    UA_StatusCode retval = UA_Client_connect(client->client, ClientNetworkLayerTCP_connect,
+    UA_StatusCode retval = UA_Client_connect(client->client, UA_ClientConnectionTCP,
                                              lua_tostring(L, 2));
     lua_pushinteger(L, retval);
     return 1;
+}
+
+int ua_client_getendpoints(lua_State *L) {
+    if(!lua_isstring(L, 1))
+        return luaL_error(L, "Supply a connection string of the form opc.tcp://url:port");
+    UA_Client *client = UA_Client_new(UA_ClientConfig_standard, Logger_Stdout);
+    size_t endpointsSize;
+    UA_EndpointDescription *endpoints;
+    UA_StatusCode retval = UA_Client_getEndpoints(client, UA_ClientConnectionTCP, lua_tostring(L, 1),
+                                                  &endpointsSize, &endpoints);
+    if(retval == UA_STATUSCODE_GOOD) {
+        ua_array *array = lua_newuserdata(L, sizeof(ua_array));
+        array->type = &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION];
+        array->data = &array->local_data;
+        array->length = &array->local_length;
+        array->local_data = endpoints;
+        array->local_length = endpointsSize;
+        luaL_setmetatable(L, "open62541-array");
+    } else {
+        lua_pushnil(L);
+    }
+    lua_pushinteger(L, retval);
+    UA_Client_disconnect(client);
+    UA_Client_delete(client);
+    return 2;
 }
 
 int ua_client_disconnect(lua_State *L) {
@@ -48,7 +73,7 @@ static int ua_client_service(lua_State *L, const UA_DataType *requestType, const
     if(!client)
         return luaL_error(L, "Not a client object");
 
-    ua_data *data = luaL_testudata(L, 2 , "open62541-data");
+    ua_data *data = ua_getdata(L, 2 , requestType);
     if(!data || data->type != requestType)
         return luaL_error(L, "The request type does not match");
 

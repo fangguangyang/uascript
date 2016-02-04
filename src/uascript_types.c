@@ -88,17 +88,6 @@ static UA_Guid* parse_guid(lua_State *L, int index) {
     return guid;
 }
 
-/* String */
-static UA_String* parse_string(lua_State *L, int index) {
-    if(!lua_isstring(L, index)) {
-        luaL_error(L, "The argument is no string");
-        return NULL;
-    }
-    UA_String *s = UA_String_new();
-    *s = UA_STRING_ALLOC(lua_tostring(L, index));
-    return s;
-}
-
 /* NodeId */
 static UA_NodeId* parse_nodeid(lua_State *L, int index) {
     if(!lua_isnumber(L, index)) {
@@ -151,7 +140,7 @@ static UA_LocalizedText* parse_localizedtext(lua_State *L, int index) {
 }
 
 static UA_Variant* parse_variant(lua_State *L, int index) {
-    ua_data *data = ua_getdata(L, index);
+    ua_data *data = ua_getdata(L, index, NULL);
     if(data) {
         UA_Variant *v = UA_Variant_new();
         UA_Variant_setScalarCopy(v, data->data, data->type);
@@ -166,80 +155,51 @@ static UA_Variant* parse_variant(lua_State *L, int index) {
     return NULL;
 }
 
-static void *
-ua_type_parse(lua_State *L, const UA_DataType *type, int index) {
+// type can be null
+// index points to the arguments
+static ua_data *
+ua_type_parse(lua_State *L, int index, const UA_DataType *type) {
+    void *data = NULL;
     if(lua_isnil(L, index)) {
-        if(type == &UA_TYPES[UA_TYPES_VARIANT]) {
-            luaL_error(L, "Variants cannot be empty");
+        if(!type) {
+            luaL_error(L, "Cannot create an unspecifie type without an argument");
             return NULL;
         }
-        return UA_new(type);
+        data = UA_new(type);
     }
-    if(!type->builtin) {
-        luaL_error(L, "Only builtin types can be instantiated with arguments");
-        return NULL;
-    }
-    switch(type->typeIndex) {
-    case UA_TYPES_STRING:
-        return parse_string(L, index);
-    case UA_TYPES_GUID:
-        return parse_guid(L, index);
-    case UA_TYPES_NODEID:
-        return parse_nodeid(L, index);
-    case UA_TYPES_QUALIFIEDNAME:
-        return parse_qualifiedname(L, index);
-    case UA_TYPES_LOCALIZEDTEXT:
-        return parse_localizedtext(L, index);
-    case UA_TYPES_VARIANT:
-        return parse_variant(L, index);
-    case UA_TYPES_SBYTE:
-    case UA_TYPES_BYTE:
-    case UA_TYPES_INT16:
-    case UA_TYPES_UINT16:
-    case UA_TYPES_INT32:
-    case UA_TYPES_UINT32:
-    case UA_TYPES_INT64:
-    case UA_TYPES_UINT64: {
-        if(!lua_isnumber(L, index))
-            luaL_error(L, "Argument is not a number");
-        lua_Number n = lua_tonumber(L, index);
-        if(type->memSize == 1) {
-            UA_Byte *byte = UA_Byte_new();
-            *byte = (UA_Byte)n;
-            return byte;
-        } else if(type->memSize == 2) {
-            UA_UInt16 *i16 = UA_UInt16_new();
-            *i16 = (UA_UInt16)n;
-            return i16;
-        } else if(type->memSize == 4) {
-            UA_UInt32 *i32 = UA_UInt32_new();
-            *i32 = (UA_UInt32)n;
-            return i32;
-        } else {
-            UA_UInt64 *i64 = UA_UInt64_new();
-            *i64 = (UA_UInt64)n;
-            return i64;
+
+    if(type && type->builtin) {
+        switch(type->typeIndex) {
+        case UA_TYPES_GUID:
+            data = parse_guid(L, index);
+            break;
+        case UA_TYPES_NODEID:
+            data = parse_nodeid(L, index);
+            break;
+        case UA_TYPES_QUALIFIEDNAME:
+            data = parse_qualifiedname(L, index);
+            break;
+        case UA_TYPES_LOCALIZEDTEXT:
+            data = parse_localizedtext(L, index);
+            break;
+        case UA_TYPES_VARIANT:
+            data = parse_variant(L, index);
+            break;
+        default:
+            break;
         }
     }
-    case UA_TYPES_FLOAT: {
-        if(!lua_isnumber(L, index))
-            luaL_error(L, "Argument is not a number");
-        lua_Number n = lua_tonumber(L, index);
-        UA_Float *v = UA_Float_new();
-        *v = n;
-        return v;
+
+    if(data) {
+        ua_data *d = lua_newuserdata(L, sizeof(ua_data));
+        d->data = data;
+        d->type = type;
+        luaL_setmetatable(L, "open62541-data");
+        return d;
     }
-    case UA_TYPES_DOUBLE: {
-        if(!lua_isnumber(L, index))
-            luaL_error(L, "Argument is not a number");
-        lua_Number n = lua_tonumber(L, index);
-        UA_Double *v = UA_Double_new();
-        *v = n;
-        return v;
-    }
-    }
-    luaL_error(L, "Cannot parse arguments for this data type");
-    return NULL;
+    ua_data *d = ua_getdata(L, index, type);
+    lua_pushvalue(L, index);
+    return d;
 }
 
 /* General type constructor function. Takes the datatype from its closure. */
@@ -247,10 +207,7 @@ int ua_type_instantiate(lua_State *L) {
     lua_pushnil(L); // separator between data from the user and what we add
     lua_rawgeti(L, 1, 1);
     const UA_DataType *type = lua_touserdata(L, -1);
-    ua_data *data = lua_newuserdata(L, sizeof(ua_data));
-    data->type = type;
-    data->data = ua_type_parse(L, type, 2);
-    luaL_setmetatable(L, "open62541-data");
+    ua_data *data = ua_type_parse(L, 2, type);
     return 1;
 }
 
@@ -261,10 +218,6 @@ int ua_type_tostring(lua_State *L) {
     lua_pushstring(L, type->typeName);
     lua_concat(L, 2);
     return 1;
-}
-
-int ua_type_indexerr(lua_State *L) {
-    return luaL_error(L, "Type cannot be indexed");
 }
 
 void ua_type_push_typetable(lua_State *L, const UA_DataType *type) {
@@ -300,7 +253,7 @@ int ua_get_type(lua_State *L) {
 }
 
 int ua_gc(lua_State *L) {
-    ua_data *data = ua_getdata(L, -1);
+    ua_data *data = ua_getdata(L, -1, NULL);
     if(!data || !data->data)
         return 0;
     lua_getuservalue(L, -1);
@@ -312,41 +265,181 @@ int ua_gc(lua_State *L) {
 
 /* Read the data at the index in the lua stack, replace it with an open62541 data and return a pointer */
 ua_data *
-ua_getdata(lua_State *L, int index) {
+ua_getdata(lua_State *L, int index, const UA_DataType *type) {
     ua_data *data = luaL_testudata(L, index , "open62541-data");
-    if(data)
-        return data;
+    if(data && (!type || type == data->type))
+        return data; 
 
-    /* try to convert */
-    if(lua_isboolean(L, index)) {
-        data = lua_newuserdata(L, sizeof(ua_data));
-        data->type = &UA_TYPES[UA_TYPES_BOOLEAN];
-        data->data = UA_Boolean_new();
-        *(UA_Boolean*)data->data = lua_toboolean(L, index);
-        luaL_setmetatable(L, "open62541-data");
-        lua_replace(L, index);
-    } else if(lua_isnumber(L, index)) {
-        lua_Number n = lua_tonumber(L, index);
-        data = lua_newuserdata(L, sizeof(ua_data));
-        if(n == (int)n) {
-            data->data = UA_Int32_new();
-            *(UA_Int32*)data->data = n;
-            data->type = &UA_TYPES[UA_TYPES_INT32];
-        } else {
-            data->data = UA_Float_new();
-            *(UA_Float*)data->data = n;
-            data->type = &UA_TYPES[UA_TYPES_FLOAT];
+    lua_Number number;
+    UA_String str = UA_STRING_NULL;
+    UA_Boolean isNumber = false;
+    UA_Boolean isString = true;
+
+    if(data) {
+        if(!data->type->builtin) {
+            luaL_error(L, "Cannot convert from ua.types.%s to ua.types.%s", data->type, type->typeName);
+            return NULL;
         }
-        luaL_setmetatable(L, "open62541-data");
-        lua_replace(L, index);
-    } else if(lua_isstring(L, index)) {
-        data = lua_newuserdata(L, sizeof(ua_data));
-        data->type = &UA_TYPES[UA_TYPES_STRING];
-        data->data = parse_string(L, index);
-        luaL_setmetatable(L, "open62541-data");
-        lua_replace(L, index);
-    } else
-        return NULL;
+        switch(data->type->typeIndex) {
+        case UA_TYPES_BOOLEAN:
+            number = *(UA_Boolean*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_SBYTE:
+            number = *(UA_SByte*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_BYTE:
+            number = *(UA_Byte*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_INT16:
+            number = *(UA_Int16*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_UINT16:
+            number = *(UA_UInt16*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_INT32:
+            number = *(UA_Int32*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_UINT32:
+            number = *(UA_UInt32*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_INT64:
+            number = *(UA_Int64*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_UINT64:
+            number = *(UA_UInt64*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_FLOAT:
+            number = *(UA_Float*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_DOUBLE:
+            number = *(UA_Double*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_DATETIME:
+            number = *(UA_DateTime*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_STATUSCODE:
+            number = *(UA_StatusCode*)data->data;
+            isNumber = true;
+            break;
+        case UA_TYPES_STRING:
+        case UA_TYPES_BYTESTRING:
+        case UA_TYPES_XMLELEMENT:
+            UA_String_copy(data->data, &str);
+            isString = true;
+        default:
+            luaL_error(L, "Cannot convert from ua.types.%s to ua.types.%s", data->type, type->typeName);
+            return NULL;
+        }
+    } else {
+        if(lua_isboolean(L, index)) {
+            number = lua_toboolean(L, index);
+            isNumber = true;
+        } else if(lua_isnumber(L, index)) {
+            number = lua_tonumber(L, index);
+            isNumber = true;
+        } else if(lua_isstring(L, index)) {
+            str = UA_String_fromChars(lua_tostring(L, index));
+            isString = true;
+        } else {
+            luaL_error(L, "Cannot convert from native Lua type");
+            return NULL;
+        }
+    }
+
+    if(!type) {
+        if(isString)
+            type = &UA_TYPES[UA_TYPES_STRING];
+        else
+            type = &UA_TYPES[UA_TYPES_DOUBLE];
+    }
+
+    data = lua_newuserdata(L, sizeof(ua_data));
+    if(isNumber) {
+        switch(type->typeIndex) {
+        case UA_TYPES_BOOLEAN:
+            data->data = UA_Boolean_new();
+            *(UA_Boolean*)data->data = number;
+            break;
+        case UA_TYPES_SBYTE:
+            data->data = UA_SByte_new();
+            *(UA_SByte*)data->data = number;
+            break;
+        case UA_TYPES_BYTE:
+            data->data = UA_Byte_new();
+            *(UA_Byte*)data->data = number;
+            break;
+        case UA_TYPES_INT16:
+            data->data = UA_Int16_new();
+            *(UA_Int16*)data->data = number;
+            break;
+        case UA_TYPES_UINT16:
+            data->data = UA_UInt16_new();
+            *(UA_UInt16*)data->data = number;
+            break;
+        case UA_TYPES_INT32:
+            data->data = UA_Int32_new();
+            *(UA_Int32*)data->data = number;
+            break;
+        case UA_TYPES_UINT32:
+            data->data = UA_UInt32_new();
+            *(UA_UInt32*)data->data = number;
+            break;
+        case UA_TYPES_INT64:
+            data->data = UA_Int64_new();
+            *(UA_Int64*)data->data = number;
+            break;
+        case UA_TYPES_UINT64:
+            data->data = UA_UInt64_new();
+            *(UA_UInt64*)data->data = number;
+            break;
+        case UA_TYPES_FLOAT:
+            data->data = UA_Float_new();
+            *(UA_Float*)data->data = number;
+            break;
+        case UA_TYPES_DOUBLE:
+            data->data = UA_Double_new();
+            *(UA_Double*)data->data = number;
+            break;
+        case UA_TYPES_DATETIME:
+            data->data = UA_DateTime_new();
+            *(UA_DateTime*)data->data = number;
+            break;
+        case UA_TYPES_STATUSCODE:
+            data->data = UA_StatusCode_new();
+            *(UA_StatusCode*)data->data = number;
+            break;
+        default:
+            luaL_error(L, "Cannot convert from numerical to ua.types.%s", type->typeName);
+            return NULL;
+        }
+        data->type = type;
+    } else {
+        if(type != &UA_TYPES[UA_TYPES_STRING] &&
+           type != &UA_TYPES[UA_TYPES_BYTESTRING] &&
+           type != &UA_TYPES[UA_TYPES_XMLELEMENT]) {
+            UA_String_deleteMembers(&str);
+            luaL_error(L, "Cannot convert from string to ua.types.%s", type->typeName);
+            return NULL;
+        }
+        data->type = type;
+        data->data = UA_new(type);
+        *(UA_String*)data->data = str;
+    }
+    
+    luaL_setmetatable(L, "open62541-data");
+    lua_replace(L, index);
     return data;
 }
 
@@ -366,7 +459,7 @@ ua_getarray(lua_State *L, int index) {
 
     const UA_DataType *type = NULL;
     lua_rawgeti(L, index, 1);
-    ua_data *data = ua_getdata(L, -1);
+    ua_data *data = ua_getdata(L, -1, NULL);
     if(!data) {
         luaL_error(L, "Cannot transform array content to ua type");
         return NULL;
@@ -386,15 +479,7 @@ ua_getarray(lua_State *L, int index) {
     uintptr_t pos = (uintptr_t)array->local_data + type->memSize;
     for(int i = 2; i <= len; i++) {
         lua_rawgeti(L, index, i);
-        data = ua_getdata(L, -1);
-        if(!data) {
-            luaL_error(L, "Cannot transform array content to ua type");
-            return NULL;
-        }
-        if(data->type != type) {
-            luaL_error(L, "Array contains different data types");
-            return NULL;
-        }
+        data = ua_getdata(L, -1, type);
         UA_copy(data->data, (void*)pos, type);
         pos += type->memSize;
         lua_pop(L, 1); // the data
@@ -487,7 +572,7 @@ ua_nodeid_index(lua_State *L, int dataindex, UA_NodeId *id, const char *key) {
             return ua_return_member(L, dataindex, &id->identifier.guid, &UA_TYPES[UA_TYPES_GUID]);
         return ua_return_member(L, dataindex, &id->identifier.string, &UA_TYPES[UA_TYPES_STRING]);
     }
-    return luaL_error(L, "Cannot get this index");
+    return luaL_error(L, "Cannot get this index %s", key);
 }
 
 static int
@@ -498,7 +583,16 @@ ua_expandednodeid_index(lua_State *L, int dataindex, UA_ExpandedNodeId *id, cons
         return ua_return_member(L, dataindex, &id->namespaceUri, &UA_TYPES[UA_TYPES_STRING]);
     if(strcmp(key, "serverIndex") == 0)
         return ua_return_member(L, dataindex, &id->serverIndex, &UA_TYPES[UA_TYPES_UINT32]);
-    return luaL_error(L, "Cannot get this index");
+    return luaL_error(L, "Cannot get this index %s", key);
+}
+
+static int
+ua_localizedtext_index(lua_State *L, int dataindex, UA_LocalizedText *lt, const char *key) {
+    if(strcmp(key, "locale") == 0)
+        return ua_return_member(L, dataindex, &lt->locale, &UA_TYPES[UA_TYPES_STRING]);
+    if(strcmp(key, "text") == 0)
+        return ua_return_member(L, dataindex, &lt->text, &UA_TYPES[UA_TYPES_STRING]);
+    return luaL_error(L, "Cannot get this index %s", key);
 }
 
 /* access to variant always returns a copy */
@@ -533,7 +627,7 @@ ua_variant_index(lua_State *L, int dataindex, UA_Variant *v, const char *key) {
         luaL_setmetatable(L, "open62541-array");
         return 1;
     }
-    return luaL_error(L, "Cannot get this index");
+    return luaL_error(L, "Cannot get this index %s", key);
 }
 
 static int
@@ -580,7 +674,61 @@ ua_datavalue_index(lua_State *L, int dataindex, UA_DataValue *v, const char *key
         }
         return ua_return_member(L, dataindex, &v->serverPicoseconds, &UA_TYPES[UA_TYPES_UINT16]);
     }
-    return luaL_error(L, "Cannot get this index");
+    return luaL_error(L, "Cannot get this index %s", key);
+}
+
+static int
+ua_diagnosticinfo_index(lua_State *L, int dataindex, UA_DiagnosticInfo *di, const char *key) {
+    if(strcmp(key, "symbolicId") == 0) {
+        if(!di->hasSymbolicId) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &di->symbolicId, &UA_TYPES[UA_TYPES_INT32]);
+    }
+    if(strcmp(key, "namespaceUri") == 0) {
+        if(!di->hasNamespaceUri) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &di->namespaceUri, &UA_TYPES[UA_TYPES_INT32]);
+    }
+    if(strcmp(key, "localizedText") == 0) {
+        if(!di->hasLocalizedText) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &di->localizedText, &UA_TYPES[UA_TYPES_INT32]);
+    }
+    if(strcmp(key, "locale") == 0) {
+        if(!di->hasLocale) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &di->locale, &UA_TYPES[UA_TYPES_INT32]);
+    }
+    if(strcmp(key, "additionalInfo") == 0) {
+        if(!di->hasAdditionalInfo) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &di->additionalInfo, &UA_TYPES[UA_TYPES_STRING]);
+    }
+    if(strcmp(key, "innerStatusCode") == 0) {
+        if(!di->hasInnerStatusCode) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, &di->innerStatusCode, &UA_TYPES[UA_TYPES_STATUSCODE]);
+    }
+    if(strcmp(key, "innerDiagnosticInfo") == 0) {
+        if(!di->hasInnerDiagnosticInfo || !di->innerDiagnosticInfo) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return ua_return_member(L, dataindex, di->innerDiagnosticInfo, &UA_TYPES[UA_TYPES_DIAGNOSTICINFO]);
+    }
+    return luaL_error(L, "Cannot get this index %s", key);
 }
 
 static int ua_index_key(lua_State *L, int dataindex, const char *key) {
@@ -590,10 +738,14 @@ static int ua_index_key(lua_State *L, int dataindex, const char *key) {
         return ua_nodeid_index(L, dataindex, data->data, key);
     if(data->type == &UA_TYPES[UA_TYPES_EXPANDEDNODEID])
         return ua_expandednodeid_index(L, dataindex, data->data, key);
+    if(data->type == &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])
+        return ua_localizedtext_index(L, dataindex, data->data, key);
     else if(data->type == &UA_TYPES[UA_TYPES_VARIANT])
         return ua_variant_index(L, dataindex, data->data, key);
     else if(data->type == &UA_TYPES[UA_TYPES_DATAVALUE])
         return ua_datavalue_index(L, dataindex, data->data, key);
+    else if(data->type == &UA_TYPES[UA_TYPES_DIAGNOSTICINFO])
+        return ua_diagnosticinfo_index(L, dataindex, data->data, key);
 
     int memberindex = find_memberindex(data->type, key);
     if(memberindex < 0)
@@ -623,7 +775,7 @@ int ua_index(lua_State *L) {
 static int
 ua_variant_newindex(lua_State *L, UA_Variant *v, const char *key, int index) {
     if(strcmp(key, "value") == 0) {
-        ua_data *data = ua_getdata(L, index);
+        ua_data *data = ua_getdata(L, index, NULL);
         if(data) {
             if(v->data > UA_EMPTY_ARRAY_SENTINEL && v->storageType == UA_VARIANT_DATA) {
                 if(UA_Variant_isScalar(v))
@@ -690,39 +842,7 @@ int ua_newindex(lua_State *L) {
         return 0;
     }
     
-    ua_data *data = ua_getdata(L, 3);
-    if(!data)
-        return luaL_error(L, "Types don't match");
-    if(data->type == &UA_TYPES[UA_TYPES_INT32]) {
-        UA_Int32 n = *(UA_Int32*)data->data;
-        if(membertype->builtin) {
-            switch(membertype->typeIndex) {
-            case UA_TYPES_BOOLEAN:
-                *(UA_Boolean*)member = n;
-                return 0;
-            case UA_TYPES_SBYTE:
-            case UA_TYPES_BYTE:
-                *(UA_Byte*)member = n;
-                return 0;
-            case UA_TYPES_INT16:
-            case UA_TYPES_UINT16:
-                *(UA_Int16*)member = n;
-                return 0;
-            case UA_TYPES_INT32:
-            case UA_TYPES_UINT32:
-            case UA_TYPES_STATUSCODE:
-                *(UA_Int32*)member = n;
-                return 0;
-            case UA_TYPES_INT64:
-            case UA_TYPES_UINT64:
-            case UA_TYPES_DATETIME:
-                *(UA_Int64*)member = n;
-                return 0;
-            }
-        }
-    }
-    if(membertype != data->type)
-        return luaL_error(L, "Types don't match");
+    ua_data *data = ua_getdata(L, 3, membertype);
     UA_deleteMembers(member, membertype);
     UA_copy(data->data, member, membertype);
     return 0;
@@ -752,8 +872,8 @@ const char * datavalue_keys[] = {"value", "status", "sourceTimestamp", "sourcePi
                                  "serverTimestamp", "serverPicoseconds"};
 
 size_t diagnosticinfo_keysSize = 7;
-const char *diagnosticinfo_keys[] = {"SymbolicId", "NamespaceUri", "LocalizedText", "Locale",
-                                     "AdditionalInfo", "InnerStatusCode", "InnerDiagnosticInfo" };
+const char *diagnosticinfo_keys[] = {"symbolicId", "namespaceUri", "localizedText", "locale",
+                                     "additionalInfo", "innerStatusCode", "innerDiagnosticInfo" };
 
 static int
 ua_iterate_builtin(lua_State *L, int dataindex, const char *key,
@@ -789,6 +909,8 @@ static int ua_iterate_atindex(lua_State *L, int dataindex) {
         return ua_iterate_builtin(L, dataindex, key, variant_keys, variant_keysSize);
     else if(data->type == &UA_TYPES[UA_TYPES_DATAVALUE])
         return ua_iterate_builtin(L, dataindex, key, datavalue_keys, datavalue_keysSize);
+    else if(data->type == &UA_TYPES[UA_TYPES_DIAGNOSTICINFO])
+        return ua_iterate_builtin(L, dataindex, key, diagnosticinfo_keys, diagnosticinfo_keysSize);
     
     int memberindex;
     if(!key) {
@@ -857,7 +979,10 @@ ua_tostring_structured(lua_State *L, size_t level) {
         lua_pushvalue(L, v_index);
         lua_remove(L, v_index);
         v_index = lua_gettop(L);
-        if(luaL_testudata(L, -1, "open62541-data"))
+        if(lua_isnil(L, -1)) {
+            lua_pushstring(L, "nil");
+            pushed++;
+        } else if(luaL_testudata(L, -1, "open62541-data"))
             pushed += ua_tostring_level(L, level+1);
         else
             pushed += ua_array_tostring_level(L, level+1);
@@ -1150,9 +1275,7 @@ int ua_array_newindex(lua_State *L) {
         return 0;
     }
 
-    ua_data *data = ua_getdata(L, 3);
-    if(!data || data->type != array->type)
-        return luaL_error(L, "The value is of the wrong type");
+    ua_data *data = ua_getdata(L, 3, array->type);
 
     /* insert an entry */
     if(index == *array->length) {

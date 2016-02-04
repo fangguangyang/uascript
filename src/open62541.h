@@ -1,6 +1,6 @@
 /* THIS IS A SINGLE-FILE DISTRIBUTION CONCATENATED FROM THE OPEN62541 SOURCES 
  * visit http://open62541.org/ for information about this software
- * Git-Revision: v0.1.0-RC4-914-g6a52c4e
+ * Git-Revision: v0.1.0-RC4-991-g8feb188
  */
  
  /*
@@ -72,39 +72,81 @@ extern "C" {
 #endif
 
 /* Endianness */
-#if defined(__linux__) || defined(__APPLE__)
-# ifndef __QNX__
-#  if defined(__APPLE__) || defined(__MACH__)
-#   include <machine/endian.h>
-#  else
-#   include <endian.h>
-#  endif
-# endif
-# if ( __BYTE_ORDER != __LITTLE_ENDIAN )
-#  define UA_NON_LITTLEENDIAN_ARCHITECTURE
-# endif
-#elif _WIN32
+// UA_NON_LITTLEENDIAN_ARCHITECTURE disables memcpying integer arrays directly
+// onto the message buffer. UA_MIXED_ENDIAN enables special encoding for floats
+// and doubles. Otherwise, they are endianness-switched similar to integers.
+
+#if defined(__LITTLE_ENDIAN__) || defined(_WIN32) || (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 # define htole16(x) (x)
 # define htole32(x) (x)
 # define htole64(x) (x)
 # define le16toh(x) (x)
 # define le32toh(x) (x)
 # define le64toh(x) (x)
+#else
+# if defined(__ANDROID__)
+#  include <endian.h>
+#  define le16toh(x) letoh16(x)
+#  define le32toh(x) letoh32(x)
+#  define le64toh(x) letoh64(x)
+# elif defined(__linux__)
+#  include <endian.h>
+# elif defined(__OpenBSD__)
+#  include <sys/endian.h>
+# elif defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
+#  include <sys/endian.h>
+#  define le16toh(x) letoh16(x)
+#  define le32toh(x) letoh32(x)
+#  define le64toh(x) letoh64(x)
+# elif defined(__APPLE__)
+#  include <libkern/OSByteOrder.h>
+#  define htole16(x) OSSwapHostToLittleInt16(x)
+#  define htole32(x) OSSwapHostToLittleInt32(x)
+#  define htole64(x) OSSwapHostToLittleInt64(x)
+#  define le16toh(x) OSSwapLittleToHostInt16(x)
+#  define le32toh(x) OSSwapLittleToHostInt32(x)
+#  define le64toh(x) OSSwapLittleToHostInt64(x)
+#  define __BYTE_ORDER BYTE_ORDER
+# elif defined(__QNX__) || defined(__QNXNTO__)
+#  include <gulliver.h>
+#  if defined(__LITTLEENDIAN__)
+#   define __BYTE_ORDER __LITTLE_ENDIAN
+#  endif
+#  define htole16(x) ENDIAN_LE16(x)
+#  define htole32(x) ENDIAN_LE32(x)
+#  define htole64(x) ENDIAN_LE64(x)
+#  define le16toh(x) ENDIAN_LE16(x)
+#  define le32toh(x) ENDIAN_LE32(x)
+#  define le64toh(x) ENDIAN_LE64(x)
+# endif
+# if ( __BYTE_ORDER != __LITTLE_ENDIAN ) && (_BYTE_ORDER != _LITTLE_ENDIAN)
+#  define UA_NON_LITTLEENDIAN_ARCHITECTURE
+# endif
 #endif
 
-/* Force non-little endian manually by setting the following. */
-// #define UA_NON_LITTLEENDIAN_ARCHITECTURE
-// #define htole16(x) {...}(x)
-// #define htole32(x) {...}(x)
-// #define htole64(x) {...}(x)
-// #define le16toh(x) {...}(x)
-// #define le32toh(x) {...}(x)
-// #define le64toh(x) {...}(x)
+/* Manually override */
+// If required, define UA_NON_LITTLEENDIAN_ARCHITECTURE, UA_MIXED_ENDIAN, and
+// the htole / letoh functions here. Even better, post an issue on github or the
+// mailing list, so we can include the architecture in the standard release.
+#define swap16(u16) ((u16 >> 8) | (u16 << 8))
+#define swap32(u32) ((u32 >> 24) | ((u32 << 8) & 0x00FF0000) | ((u32 >> 8) & 0x0000FF00) | (u32 << 24))
+#define swap64(u64) ((u64 >> 56) | ((u64 << 40) & 0x00FF000000000000) | ((u64 << 24) & 0x0000FF0000000000) | \
+                     ((u64 << 8) & 0x000000FF00000000) | ((u64 >> 8) & 0x00000000FF000000) |                 \
+                     ((u64 >> 24) & 0x0000000000FF0000) | ((u64 >> 40) & 0x000000000000FF00) | (u64 << 56))
 
-/* Mixed Endian */
 #ifdef __ARM_ARCH_4T__
 # define UA_MIXED_ENDIAN
 # define UA_NON_LITTLEENDIAN_ARCHITECTURE
+# define htole16(x) swap16(x)
+# define htole32(x) swap32(x)
+# define htole64(x) swap64(x)
+# define le16toh(x) swap16(x)
+# define le32toh(x) swap32(x)
+# define le64toh(x) swap64(x)
+#endif
+
+#ifndef htole16
+# error The endianness of the architecture not known
 #endif
 
 /* Inline Functions */
@@ -407,7 +449,7 @@ extern "C" {
 /* Builtin Type Definitions */
 /****************************/
 
-#define UA_BUILTIN_TYPES_COUNT 25
+#define UA_BUILTIN_TYPES_COUNT 25U
 
 /** Boolean: A two-state logical value (true or false) */
 typedef bool UA_Boolean;
@@ -518,9 +560,9 @@ typedef struct UA_DateTimeStruct {
     UA_UInt16 year;
 } UA_DateTimeStruct;
 
-UA_DateTimeStruct UA_EXPORT UA_DateTime_toStruct(UA_DateTime time);
+UA_DateTimeStruct UA_EXPORT UA_DateTime_toStruct(UA_DateTime t);
 
-UA_String UA_EXPORT UA_DateTime_toString(UA_DateTime time);
+UA_String UA_EXPORT UA_DateTime_toString(UA_DateTime t);
 
 /**************************************************************************/
 /* Guid: A 16 byte value that can be used as a globally unique identifier */
@@ -594,7 +636,7 @@ static UA_INLINE UA_Boolean UA_NodeId_isNull(const UA_NodeId *p) {
 
 UA_Boolean UA_EXPORT UA_NodeId_equal(const UA_NodeId *n1, const UA_NodeId *n2);
 
-static UA_INLINE UA_NodeId UA_NODEID_NUMERIC(UA_UInt16 nsIndex, UA_Int32 identifier) {
+static UA_INLINE UA_NodeId UA_NODEID_NUMERIC(UA_UInt16 nsIndex, UA_UInt32 identifier) {
     UA_NodeId id; id.namespaceIndex = nsIndex; id.identifierType = UA_NODEIDTYPE_NUMERIC;
     id.identifier.numeric = identifier; return id; }
 
@@ -627,7 +669,7 @@ typedef struct {
     UA_UInt32 serverIndex;
 } UA_ExpandedNodeId;
 
-static UA_INLINE UA_ExpandedNodeId UA_EXPANDEDNODEID_NUMERIC(UA_UInt16 nsIndex, UA_Int32 identifier) {
+static UA_INLINE UA_ExpandedNodeId UA_EXPANDEDNODEID_NUMERIC(UA_UInt16 nsIndex, UA_UInt32 identifier) {
     UA_ExpandedNodeId id; id.nodeId = UA_NODEID_NUMERIC(nsIndex, identifier);
     id.serverIndex = 0; id.namespaceUri = UA_STRING_NULL; return id; }
 
@@ -885,8 +927,6 @@ typedef struct UA_DiagnosticInfo {
 /* Generic Type Handling */
 /*************************/
 
-#define UA_MAX_TYPE_MEMBERS 13 // Maximum number of members per structured type
-
 typedef struct {
 #ifdef UA_ENABLE_TYPENAMES
     const char *memberName;
@@ -914,7 +954,7 @@ struct UA_DataType {
     UA_Boolean  builtin      : 1; ///< The type is "builtin" and has dedicated de- and encoding functions
     UA_Boolean  fixedSize    : 1; ///< The type (and its members) contains no pointers
     UA_Boolean  zeroCopyable : 1; ///< The type can be copied directly off the stream (given that the endianness matches)
-    UA_DataTypeMember members[UA_MAX_TYPE_MEMBERS];
+    UA_DataTypeMember *members;
 };
 
 /**
@@ -1061,7 +1101,7 @@ UA_EXPORT void UA_random_seed(UA_UInt64 seed);
  * /home/jpfr/software/open62541/build/src_generated/ua_nodeids.hgen -- do not modify
  **********************************************************
  * Generated from /home/jpfr/software/open62541/tools/schema/NodeIds.csv with script /home/jpfr/software/open62541/tools/generate_nodeids.py
- * on host virtualbox by user jpfr at 2015-12-15 07:22:34
+ * on host virtualbox by user jpfr at 2016-01-26 11:28:31
  **********************************************************/
  
 
@@ -1766,7 +1806,7 @@ UA_EXPORT void UA_random_seed(UA_UInt64 seed);
 * @brief Autogenerated data types
 *
 * Generated from Opc.Ua.Types.bsd with script /home/jpfr/software/open62541/tools/generate_datatypes.py
-* on host virtualbox by user jpfr at 2015-12-16 04:18:39
+* on host virtualbox by user jpfr at 2016-02-03 06:06:32
 */
 
 
@@ -1789,7 +1829,7 @@ extern "C" {
 
 #define UA_TYPES_COUNT 154
 
-extern UA_EXPORT const UA_DataType *UA_TYPES;
+extern UA_EXPORT const UA_DataType UA_TYPES[];
 
 
 #define UA_TYPES_BOOLEAN 0
@@ -4155,51 +4195,58 @@ extern "C" {
 #endif
 
 
-/*********************************/
-/* Initialize and run the server */
-/*********************************/
+/*****************/
+/* Server Config */
+/*****************/
 
-typedef struct UA_ServerConfig {
-    UA_Boolean  Login_enableAnonymous;
+struct UA_ServerNetworkLayer; // forwards declaration
+typedef struct UA_ServerNetworkLayer UA_ServerNetworkLayer;    
 
-    UA_Boolean  Login_enableUsernamePassword;
-    char**      Login_usernames;
-    char**      Login_passwords;
-    UA_UInt32   Login_loginsCount;
+typedef struct {
+    UA_String username;
+    UA_String password;
+} UA_UsernamePasswordLogin;
 
-    char*       Application_applicationURI;
-    char*       Application_applicationName;
+typedef struct {
+    UA_UInt16 nThreads; // only if multithreading is enabled
+    UA_Logger logger;
+
+    UA_BuildInfo buildInfo;
+    UA_ApplicationDescription applicationDescription;
+    UA_ByteString serverCertificate;
+
+    size_t networkLayersSize;
+    UA_ServerNetworkLayer *networkLayers;
+
+    UA_Boolean enableAnonymousLogin;
+    UA_Boolean enableUsernamePasswordLogin;
+    size_t usernamePasswordLoginsSize;
+    UA_UsernamePasswordLogin usernamePasswordLogins[];
 } UA_ServerConfig;
 
 extern UA_EXPORT const UA_ServerConfig UA_ServerConfig_standard;
 
-UA_Server UA_EXPORT * UA_Server_new(UA_ServerConfig config);
-void UA_EXPORT UA_Server_setServerCertificate(UA_Server *server, UA_ByteString certificate);
-void UA_EXPORT UA_Server_delete(UA_Server *server);
+/*********************************/
+/* Initialize and run the server */
+/*********************************/
 
-/** Sets the logger used by the server */
-void UA_EXPORT UA_Server_setLogger(UA_Server *server, UA_Logger logger);
+UA_Server UA_EXPORT * UA_Server_new(const UA_ServerConfig config);
+void UA_EXPORT UA_Server_delete(UA_Server *server);
 
 /**
  * Runs the main loop of the server. In each iteration, this calls into the networklayers to see if
  * jobs have arrived and checks if repeated jobs need to be triggered.
- *
- * @param server The server object
- * @param nThreads The number of worker threads. Is ignored if MULTITHREADING is not activated.
- * @param running Points to a boolean value on the heap. When running is set to false, the worker
- *        threads and the main loop close and the server is shut down.
- * @return Indicates whether the server shut down cleanly
  */
-UA_StatusCode UA_EXPORT UA_Server_run(UA_Server *server, UA_UInt16 nThreads, UA_Boolean *running);
+UA_StatusCode UA_EXPORT UA_Server_run(UA_Server *server, volatile UA_Boolean *running);
 
 /** The prologue part of UA_Server_run (no need to use if you call UA_Server_run) */
-UA_StatusCode UA_EXPORT UA_Server_run_startup(UA_Server *server, UA_UInt16 nThreads, UA_Boolean *running);
-
-/** The epilogue part of UA_Server_run (no need to use if you call UA_Server_run) */
-UA_StatusCode UA_EXPORT UA_Server_run_shutdown(UA_Server *server, UA_UInt16 nThreads);
+UA_StatusCode UA_EXPORT UA_Server_run_startup(UA_Server *server);
 
 /** One iteration of UA_Server_run (no need to use if you call UA_Server_run) */
-UA_StatusCode UA_EXPORT UA_Server_run_mainloop(UA_Server *server, UA_Boolean *running);
+UA_StatusCode UA_EXPORT UA_Server_run_iterate(UA_Server *server);
+
+/** The epilogue part of UA_Server_run (no need to use if you call UA_Server_run) */
+UA_StatusCode UA_EXPORT UA_Server_run_shutdown(UA_Server *server);
 
 /**
  * @param server The server object.
@@ -4224,6 +4271,9 @@ UA_StatusCode UA_EXPORT UA_Server_addRepeatedJob(UA_Server *server, UA_Job job,
  */
 UA_StatusCode UA_EXPORT UA_Server_removeRepeatedJob(UA_Server *server, UA_Guid jobId);
 
+/** @brief Add a new namespace to the server. Returns the index of the new namespace */
+UA_UInt16 UA_EXPORT UA_Server_addNamespace(UA_Server *server, const char* name);
+
 /**
  * Interface to the binary network layers. This structure is returned from the
  * function that initializes the network layer. The layer is already bound to a
@@ -4231,9 +4281,9 @@ UA_StatusCode UA_EXPORT UA_Server_removeRepeatedJob(UA_Server *server, UA_Guid j
  * in parallel but only sequentially from the server's main loop. So the network
  * layer does not need to be thread-safe.
  */
-typedef struct UA_ServerNetworkLayer {
+struct UA_ServerNetworkLayer {
+    void *handle; // pointer to internal data
     UA_String discoveryUrl;
-    UA_Logger logger; ///< Set during _start
 
     /**
      * Starts listening on the the networklayer.
@@ -4242,7 +4292,7 @@ typedef struct UA_ServerNetworkLayer {
      * @param logger The logger
      * @return Returns UA_STATUSCODE_GOOD or an error code.
      */
-    UA_StatusCode (*start)(struct UA_ServerNetworkLayer *nl, UA_Logger logger);
+    UA_StatusCode (*start)(UA_ServerNetworkLayer *nl, UA_Logger logger);
     
     /**
      * Gets called from the main server loop and returns the jobs (accumulated messages and close
@@ -4254,7 +4304,7 @@ typedef struct UA_ServerNetworkLayer {
      * @param timeout The timeout during which an event must arrive in microseconds
      * @return The size of the jobs array. If the result is negative, an error has occurred.
      */
-    size_t (*getJobs)(struct UA_ServerNetworkLayer *nl, UA_Job **jobs, UA_UInt16 timeout);
+    size_t (*getJobs)(UA_ServerNetworkLayer *nl, UA_Job **jobs, UA_UInt16 timeout);
 
     /**
      * Closes the network connection and returns all the jobs that need to be finished before the
@@ -4265,22 +4315,11 @@ typedef struct UA_ServerNetworkLayer {
      * returned size.
      * @return The size of the jobs array. If the result is negative, an error has occurred.
      */
-    size_t (*stop)(struct UA_ServerNetworkLayer *nl, UA_Job **jobs);
+    size_t (*stop)(UA_ServerNetworkLayer *nl, UA_Job **jobs);
 
-    /** Deletes the network layer. Call only after a successful shutdown. */
-    void (*deleteMembers)(struct UA_ServerNetworkLayer *nl);
-} UA_ServerNetworkLayer;
-
-/**
- * Adds a network layer to the server. The network layer is destroyed together
- * with the server. Do not use it after adding it as it might be moved around on
- * the heap.
- */
-void UA_EXPORT UA_Server_addNetworkLayer(UA_Server *server, UA_ServerNetworkLayer *networkLayer);
-
-/** @brief Add a new namespace to the server. Returns the index of the new namespace */
-UA_UInt16 UA_EXPORT UA_Server_addNamespace(UA_Server *server, const char* name);
-
+    /** Deletes the network content. Call only after stopping. */
+    void (*deleteMembers)(UA_ServerNetworkLayer *nl);
+};
 
 /**********************/
 /* Set Node Callbacks */
@@ -4289,7 +4328,7 @@ UA_UInt16 UA_EXPORT UA_Server_addNamespace(UA_Server *server, const char* name);
 /**
  * Datasources are the interface to local data providers. It is expected that
  * the read and release callbacks are implemented. The write callback can be set
- * to null.
+ * to null. The read callback is set to null will result in a BADINTERNALERROR.
  */
 typedef struct {
     void *handle; ///> A custom pointer to reuse the same datasource functions for multiple sources
@@ -4352,8 +4391,8 @@ typedef struct {
 } UA_ObjectLifecycleManagement;
 
 UA_StatusCode UA_EXPORT
-UA_Server_setObjectTypeNode_instanceLifecycleManagement(UA_Server *server, UA_NodeId nodeId,
-                                                        UA_ObjectLifecycleManagement olm);
+UA_Server_setObjectTypeNode_lifecycleManagement(UA_Server *server, UA_NodeId nodeId,
+                                                UA_ObjectLifecycleManagement olm);
 
 /* Iterate over all nodes referenced by parentNodeId by calling the callback
    function for each child node */
@@ -4367,6 +4406,11 @@ UA_Server_forEachChildNodeCall(UA_Server *server, UA_NodeId parentNodeId,
 /*******************/
 /* Node Management */
 /*******************/
+
+typedef struct UA_InstantiationCallback_s {
+  UA_StatusCode (*method)(UA_NodeId objectId, UA_NodeId definitionId, void *handle);
+  void *handle;
+} UA_InstantiationCallback;
 
 UA_StatusCode UA_EXPORT
 UA_Server_addReference(UA_Server *server, const UA_NodeId sourceId, const UA_NodeId refTypeId,
@@ -4385,70 +4429,71 @@ UA_StatusCode UA_EXPORT
 __UA_Server_addNode(UA_Server *server, const UA_NodeClass nodeClass, const UA_NodeId requestedNewNodeId,
                     const UA_NodeId parentNodeId, const UA_NodeId referenceTypeId,
                     const UA_QualifiedName browseName, const UA_NodeId typeDefinition,
-                    const UA_NodeAttributes *attr, const UA_DataType *attributeType, UA_NodeId *outNewNodeId);
+                    const UA_NodeAttributes *attr, const UA_DataType *attributeType, 
+                    UA_InstantiationCallback *instantiationCallback, UA_NodeId *outNewNodeId);
 
 static UA_INLINE UA_StatusCode
 UA_Server_addVariableNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
                           const UA_NodeId parentNodeId, const UA_NodeId referenceTypeId,
                           const UA_QualifiedName browseName, const UA_NodeId typeDefinition,
-                          const UA_VariableAttributes attr, UA_NodeId *outNewNodeId) {
+                          const UA_VariableAttributes attr, UA_InstantiationCallback *instantiationCallback, UA_NodeId *outNewNodeId) {
     return __UA_Server_addNode(server, UA_NODECLASS_VARIABLE, requestedNewNodeId, parentNodeId,
                                referenceTypeId, browseName, typeDefinition, (const UA_NodeAttributes*)&attr,
-                               &UA_TYPES[UA_TYPES_VARIABLEATTRIBUTES], outNewNodeId); }
+                               &UA_TYPES[UA_TYPES_VARIABLEATTRIBUTES], instantiationCallback, outNewNodeId); }
 
 static UA_INLINE UA_StatusCode
 UA_Server_addVariableTypeNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
                               const UA_NodeId parentNodeId, const UA_NodeId referenceTypeId,
                               const UA_QualifiedName browseName, const UA_VariableTypeAttributes attr,
-                              UA_NodeId *outNewNodeId) {
+                              UA_InstantiationCallback *instantiationCallback, UA_NodeId *outNewNodeId) {
     return __UA_Server_addNode(server, UA_NODECLASS_VARIABLETYPE, requestedNewNodeId, parentNodeId,
                                referenceTypeId, browseName, UA_NODEID_NULL, (const UA_NodeAttributes*)&attr,
-                               &UA_TYPES[UA_TYPES_VARIABLETYPEATTRIBUTES], outNewNodeId); }
+                               &UA_TYPES[UA_TYPES_VARIABLETYPEATTRIBUTES], instantiationCallback, outNewNodeId); }
 
 static UA_INLINE UA_StatusCode
 UA_Server_addObjectNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
                         const UA_NodeId parentNodeId, const UA_NodeId referenceTypeId,
                         const UA_QualifiedName browseName, const UA_NodeId typeDefinition,
-                        const UA_ObjectAttributes attr, UA_NodeId *outNewNodeId) {
+                        const UA_ObjectAttributes attr, UA_InstantiationCallback *instantiationCallback, UA_NodeId *outNewNodeId) {
     return __UA_Server_addNode(server, UA_NODECLASS_OBJECT, requestedNewNodeId, parentNodeId,
                                referenceTypeId, browseName, typeDefinition, (const UA_NodeAttributes*)&attr,
-                               &UA_TYPES[UA_TYPES_OBJECTATTRIBUTES], outNewNodeId); }
+                               &UA_TYPES[UA_TYPES_OBJECTATTRIBUTES], instantiationCallback, outNewNodeId); }
 
 static UA_INLINE UA_StatusCode
 UA_Server_addObjectTypeNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
                             const UA_NodeId parentNodeId, const UA_NodeId referenceTypeId,
                             const UA_QualifiedName browseName, const UA_ObjectTypeAttributes attr,
-                            UA_NodeId *outNewNodeId) {
+                            UA_InstantiationCallback *instantiationCallback, UA_NodeId *outNewNodeId) {
     return __UA_Server_addNode(server, UA_NODECLASS_OBJECTTYPE, requestedNewNodeId, parentNodeId,
                                referenceTypeId, browseName, UA_NODEID_NULL, (const UA_NodeAttributes*)&attr,
-                               &UA_TYPES[UA_TYPES_OBJECTTYPEATTRIBUTES], outNewNodeId); }
+                               &UA_TYPES[UA_TYPES_OBJECTTYPEATTRIBUTES], instantiationCallback, outNewNodeId); }
 
 static UA_INLINE UA_StatusCode
 UA_Server_addViewNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
                       const UA_NodeId parentNodeId, const UA_NodeId referenceTypeId,
                       const UA_QualifiedName browseName, const UA_ViewAttributes attr,
-                      UA_NodeId *outNewNodeId) {
+                      UA_InstantiationCallback *instantiationCallback, UA_NodeId *outNewNodeId) {
     return __UA_Server_addNode(server, UA_NODECLASS_VIEW, requestedNewNodeId, parentNodeId,
                                referenceTypeId, browseName, UA_NODEID_NULL, (const UA_NodeAttributes*)&attr,
-                               &UA_TYPES[UA_TYPES_VIEWATTRIBUTES], outNewNodeId); }
+                               &UA_TYPES[UA_TYPES_VIEWATTRIBUTES], instantiationCallback, outNewNodeId); }
 
 static UA_INLINE UA_StatusCode
 UA_Server_addReferenceTypeNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
                                const UA_NodeId parentNodeId, const UA_NodeId referenceTypeId,
                                const UA_QualifiedName browseName, const UA_ReferenceTypeAttributes attr,
-                               UA_NodeId *outNewNodeId) {
+                               UA_InstantiationCallback *instantiationCallback, UA_NodeId *outNewNodeId) {
     return __UA_Server_addNode(server, UA_NODECLASS_REFERENCETYPE, requestedNewNodeId, parentNodeId,
                                referenceTypeId, browseName, UA_NODEID_NULL, (const UA_NodeAttributes*)&attr,
-                               &UA_TYPES[UA_TYPES_REFERENCETYPEATTRIBUTES], outNewNodeId); }
+                               &UA_TYPES[UA_TYPES_REFERENCETYPEATTRIBUTES], instantiationCallback, outNewNodeId); }
 
 static UA_INLINE UA_StatusCode
 UA_Server_addDataTypeNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
                           const UA_NodeId parentNodeId, const UA_NodeId referenceTypeId,
                           const UA_QualifiedName browseName, const UA_DataTypeAttributes attr,
-                          UA_NodeId *outNewNodeId) {
+                          UA_InstantiationCallback *instantiationCallback, UA_NodeId *outNewNodeId) {
     return __UA_Server_addNode(server, UA_NODECLASS_DATATYPE, requestedNewNodeId, parentNodeId,
                                referenceTypeId, browseName, UA_NODEID_NULL, (const UA_NodeAttributes*)&attr,
-                               &UA_TYPES[UA_TYPES_DATATYPEATTRIBUTES], outNewNodeId); }
+                               &UA_TYPES[UA_TYPES_DATATYPEATTRIBUTES], instantiationCallback, outNewNodeId); }
 
 UA_StatusCode UA_EXPORT
 UA_Server_addDataSourceVariableNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
@@ -4457,18 +4502,18 @@ UA_Server_addDataSourceVariableNode(UA_Server *server, const UA_NodeId requested
                                     const UA_VariableAttributes attr, const UA_DataSource dataSource,
                                     UA_NodeId *outNewNodeId);
 
-#ifdef UA_ENABLE_METHODCALLS
 typedef UA_StatusCode (*UA_MethodCallback)(void *methodHandle, const UA_NodeId objectId,
                                            size_t inputSize, const UA_Variant *input,
                                            size_t outputSize, UA_Variant *output);
 
+#ifdef UA_ENABLE_METHODCALLS
 UA_StatusCode UA_EXPORT
 UA_Server_addMethodNode(UA_Server *server, const UA_NodeId requestedNewNodeId,
                         const UA_NodeId parentNodeId, const UA_NodeId referenceTypeId,
                         const UA_QualifiedName browseName, const UA_MethodAttributes attr,
                         UA_MethodCallback method, void *handle,
-                        UA_Int32 inputArgumentsSize, const UA_Argument* inputArguments, 
-                        UA_Int32 outputArgumentsSize, const UA_Argument* outputArguments,
+                        size_t inputArgumentsSize, const UA_Argument* inputArguments, 
+                        size_t outputArgumentsSize, const UA_Argument* outputArguments,
                         UA_NodeId *outNewNodeId);
 #endif
 
@@ -4764,9 +4809,8 @@ struct UA_Client;
 typedef struct UA_Client UA_Client;
 
 typedef struct UA_ClientConfig {
-    UA_Int32 timeout; //sync response timeout
-    UA_Int32 secureChannelLifeTime; // lifetime in ms (then the channel needs to be renewed)
-    UA_Int32 timeToRenewSecureChannel; //time in ms  before expiration to renew the secure channel
+    UA_UInt32 timeout; //sync response timeout
+    UA_UInt32 secureChannelLifeTime; // lifetime in ms (then the channel needs to be renewed)
     UA_ConnectionConfig localConnectionConfig;
 } UA_ClientConfig;
 
@@ -4804,6 +4848,19 @@ void UA_EXPORT UA_Client_delete(UA_Client* client);
 typedef UA_Connection (*UA_ConnectClientConnection)(UA_ConnectionConfig localConf, const char *endpointUrl,
                                                     UA_Logger logger);
 
+/**
+ * Gets a list of endpoints of a server
+ * @param client to use
+ * @param connection function. You can use ClientNetworkLayerTCP_connect from examples/networklayer_tcp.h
+ * @param server url to connect (for example "opc.tcp://localhost:16664")
+ * @param endpointDescriptionsSize size of the array of endpoint descriptions
+ * @param endpointDescriptions array of endpoint descriptions that is allocated by the function (you need to free manually)
+ * @return Indicates whether the operation succeeded or returns an error code
+ */
+UA_StatusCode UA_EXPORT
+UA_Client_getEndpoints(UA_Client *client, UA_ConnectClientConnection connectFunc,
+                       const char *serverUrl, size_t* endpointDescriptionsSize,
+                       UA_EndpointDescription** endpointDescriptions);
 /**
  * start a connection to the selected server
  *
@@ -5392,7 +5449,7 @@ UA_Client_readUserExecutableAttribute(UA_Client *client, UA_NodeId nodeId, UA_Bo
 
 UA_StatusCode UA_EXPORT
 UA_Client_call(UA_Client *client, const UA_NodeId objectId, const UA_NodeId methodId,
-               UA_Int32 inputSize, const UA_Variant *input, UA_Int32 *outputSize, UA_Variant **output);
+               size_t inputSize, const UA_Variant *input, size_t *outputSize, UA_Variant **output);
 
 /**************************/
 /* Subscriptions Handling */
@@ -5418,7 +5475,7 @@ UA_Client_Subscriptions_new(UA_Client *client, UA_SubscriptionSettings settings,
 UA_StatusCode UA_EXPORT
 UA_Client_Subscriptions_remove(UA_Client *client, UA_UInt32 subscriptionId);
 
-void UA_EXPORT UA_Client_Subscriptions_manuallySendPublishRequest(UA_Client *client);
+UA_StatusCode UA_EXPORT UA_Client_Subscriptions_manuallySendPublishRequest(UA_Client *client);
 
 UA_StatusCode UA_EXPORT
 UA_Client_Subscriptions_addMonitoredItem(UA_Client *client, UA_UInt32 subscriptionId,
@@ -5436,7 +5493,7 @@ UA_Client_Subscriptions_removeMonitoredItem(UA_Client *client, UA_UInt32 subscri
 #endif
 
 
-/*********************************** amalgamated original file "/home/jpfr/software/open62541/examples/networklayer_tcp.h" ***********************************/
+/*********************************** amalgamated original file "/home/jpfr/software/open62541/src_extra/networklayer_tcp.h" ***********************************/
 
 /*
  * This work is licensed under a Creative Commons CCZero 1.0 Universal License.
@@ -5450,17 +5507,18 @@ extern "C" {
 
 
 /** @brief Create the TCP networklayer and listen to the specified port */
-UA_ServerNetworkLayer UA_EXPORT * ServerNetworkLayerTCP_new(UA_ConnectionConfig conf, UA_UInt32 port);
+UA_ServerNetworkLayer UA_EXPORT
+UA_ServerNetworkLayerTCP(UA_ConnectionConfig conf, UA_UInt16 port);
 
 UA_Connection UA_EXPORT
-ClientNetworkLayerTCP_connect(UA_ConnectionConfig conf, const char *endpointUrl, UA_Logger logger);
+UA_ClientConnectionTCP(UA_ConnectionConfig conf, const char *endpointUrl, UA_Logger logger);
 
 #ifdef __cplusplus
 } // extern "C"
 #endif
 
 
-/*********************************** amalgamated original file "/home/jpfr/software/open62541/examples/logger_stdout.h" ***********************************/
+/*********************************** amalgamated original file "/home/jpfr/software/open62541/src_extra/logger_stdout.h" ***********************************/
 
 /*
  * This work is licensed under a Creative Commons CCZero 1.0 Universal License.

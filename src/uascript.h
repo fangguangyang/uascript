@@ -24,7 +24,6 @@ void ua_unlock_interpreter(lua_State *L);
 
 int ua_type_tostring(lua_State *L);
 int ua_type_instantiate(lua_State *L);
-int ua_type_indexerr(lua_State *L); // throws an error (readonly table)
 void ua_type_push_typetable(lua_State *L, const UA_DataType *type);
 
 /* UA userdata is always of the below type. The original userdata "owns" the
@@ -42,7 +41,7 @@ int ua_index(lua_State *L);
 int ua_newindex(lua_State *L);
 int ua_tostring(lua_State *L);
 int ua_pairs(lua_State *L);
-ua_data * ua_getdata(lua_State *L, int index);
+ua_data * ua_getdata(lua_State *L, int index, const UA_DataType *type);
 int ua_get_type(lua_State *L);
 
 /* Arrays are of a special type and have a different metatable. Arrays cannot be
@@ -91,6 +90,7 @@ int ua_client_service_browsenext(lua_State *L);
 int ua_client_service_read(lua_State *L);
 int ua_client_service_write(lua_State *L);
 int ua_client_service_call(lua_State *L);
+int ua_client_getendpoints(lua_State *L);
 
 /* Populate the Module */
 int luaopen_uascript(lua_State *L);
