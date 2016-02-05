@@ -4,48 +4,22 @@
 #include "lualib.h"
 #include "lauxlib.h"
 
-#ifndef _WIN32
-# include <pthread.h>
-#else
-# include <windows.h>
-# include <process.h>
-#endif
-
 struct ua_background_server {
-    UA_Boolean running;
-    UA_Boolean gc;
     UA_ServerNetworkLayer nl;
     UA_Server *server;
-#ifndef _WIN32
-    pthread_t thread;
-#else
-    uintptr_t thread;
-#endif
 };
 
-static void * run_server(struct ua_background_server *s) {
-    UA_Server_run(s->server, &s->running);
-    return NULL;
-}
-
 int ua_server_new(lua_State *L) {
-    int port = 16664;
-    if(lua_isnumber(L, 1))
-        port = lua_tonumber(L, 1);
+    if(!lua_isnumber(L, 1))
+        return luaL_error(L, "The 1st argument must be the server port");
+    int port = lua_tonumber(L, 1);
     struct ua_background_server *server = lua_newuserdata(L, sizeof(struct ua_background_server));
-    server->running = UA_FALSE;
-    server->gc = UA_TRUE;
     server->nl = UA_ServerNetworkLayerTCP(UA_ConnectionConfig_standard, port);
     UA_ServerConfig config = UA_ServerConfig_standard;
     config.logger = Logger_Stdout;
     config.networkLayers = &server->nl;
     config.networkLayersSize = 1;
     server->server = UA_Server_new(config);
-#ifndef _WIN32
-    server->thread = pthread_self();
-#else
-    server->thread = 0;
-#endif
     luaL_setmetatable(L, "open62541-server");
     return 1;
 }
@@ -53,42 +27,26 @@ int ua_server_new(lua_State *L) {
 int ua_server_gc(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, -1, "open62541-server");
     server->nl.deleteMembers(&server->nl);
-    if(server->gc)
-        UA_Server_delete(server->server);
+    UA_Server_delete(server->server);
     return 0;
 }
 
 int ua_server_start(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, -1, "open62541-server");
-#ifndef _WIN32
-    if(!pthread_equal(pthread_self(), server->thread))
-        return luaL_error(L, "The server is already running");
-    server->running = UA_TRUE;
-    pthread_create(&server->thread, NULL, (void*(*)(void*))run_server, (void*)server);
-#else
-    if(server->thread)
-        return luaL_error(L, "The server is already running");
-    server->running = UA_TRUE;
-    server->thread = _beginthread((void(*)(void*))run_server, 0, (void*)server);
-#endif
-    return 0;
+    lua_pushinteger(L, UA_Server_run_startup(server->server));
+    return 1;
+}
+
+int ua_server_iterate(lua_State *L) {
+    struct ua_background_server *server = luaL_checkudata (L, -1, "open62541-server");
+    lua_pushinteger(L, UA_Server_run_iterate(server->server));
+    return 1;
 }
 
 int ua_server_stop(lua_State *L) {
     struct ua_background_server *server = luaL_checkudata (L, -1, "open62541-server");
-	server->running = UA_FALSE;
-#ifndef _WIN32
-    if(pthread_equal(pthread_self(), server->thread))
-        return luaL_error(L, "The server is not running");
-    pthread_join(server->thread, NULL);
-    server->thread = pthread_self();
-#else
-    if(!server->thread)
-        return luaL_error(L, "The server is not running");
-	WaitForSingleObject(server->thread, INFINITE);
-    server->thread = 0;
-#endif
-    return 0;
+    lua_pushinteger(L, UA_Server_run_shutdown(server->server));
+    return 1;
 }
 
 int ua_server_add_variablenode(lua_State *L) {
@@ -102,11 +60,11 @@ int ua_server_add_variablenode(lua_State *L) {
     ua_data *typeDefinition = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_NODEID]);
     ua_data *attr = ua_getdata(L, 7, &UA_TYPES[UA_TYPES_VARIABLEATTRIBUTES]);
     UA_NodeId result;
-    UA_StatusCode retval =
-        UA_Server_addVariableNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
-                                  *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
-                                  *(UA_QualifiedName*)browseName->data, *(UA_NodeId*)typeDefinition->data,
-                                  *(UA_VariableAttributes*)attr->data, NULL, &result);
+    UA_StatusCode retval;
+    retval = UA_Server_addVariableNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
+                                       *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
+                                       *(UA_QualifiedName*)browseName->data, *(UA_NodeId*)typeDefinition->data,
+                                       *(UA_VariableAttributes*)attr->data, NULL, &result);
     if(retval != UA_STATUSCODE_GOOD)
         return luaL_error(L, "Statuscode is %f", retval);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
@@ -128,11 +86,11 @@ int ua_server_add_objectnode(lua_State *L) {
     ua_data *typeDefinition = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_NODEID]);
     ua_data *attr = ua_getdata(L, 7, &UA_TYPES[UA_TYPES_OBJECTATTRIBUTES]);
     UA_NodeId result;
-    UA_StatusCode retval =
-        UA_Server_addObjectNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
-                                *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
-                                *(UA_QualifiedName*)browseName->data, *(UA_NodeId*)typeDefinition->data,
-                                *(UA_ObjectAttributes*)attr->data, NULL, &result);
+    UA_StatusCode retval;
+    retval = UA_Server_addObjectNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
+                                     *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
+                                     *(UA_QualifiedName*)browseName->data, *(UA_NodeId*)typeDefinition->data,
+                                     *(UA_ObjectAttributes*)attr->data, NULL, &result);
     if(retval != UA_STATUSCODE_GOOD)
         return luaL_error(L, "Statuscode is %f", retval);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
@@ -153,11 +111,11 @@ int ua_server_add_objecttypenode(lua_State *L) {
     ua_data *browseName = ua_getdata(L, 5, &UA_TYPES[UA_TYPES_QUALIFIEDNAME]);
     ua_data *attr = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_OBJECTTYPEATTRIBUTES]);
     UA_NodeId result;
-    UA_StatusCode retval =
-        UA_Server_addObjectTypeNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
-                                    *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
-                                    *(UA_QualifiedName*)browseName->data,
-                                    *(UA_ObjectTypeAttributes*)attr->data, NULL, &result);
+    UA_StatusCode retval;
+    retval = UA_Server_addObjectTypeNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
+                                         *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
+                                         *(UA_QualifiedName*)browseName->data,
+                                         *(UA_ObjectTypeAttributes*)attr->data, NULL, &result);
     if(retval != UA_STATUSCODE_GOOD)
         return luaL_error(L, "Statuscode is %f", retval);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
@@ -178,11 +136,11 @@ int ua_server_add_referencetypenode(lua_State *L) {
     ua_data *browseName = ua_getdata(L, 5, &UA_TYPES[UA_TYPES_QUALIFIEDNAME]);
     ua_data *attr = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_REFERENCETYPEATTRIBUTES]);
     UA_NodeId result;
-    UA_StatusCode retval =
-        UA_Server_addReferenceTypeNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
-                                       *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
-                                       *(UA_QualifiedName*)browseName->data,
-                                       *(UA_ReferenceTypeAttributes*)attr->data, NULL, &result);
+    UA_StatusCode retval;
+    retval = UA_Server_addReferenceTypeNode(server->server, *(UA_NodeId*)requestedNewNodeId->data,
+                                            *(UA_NodeId*)parentNodeId->data, *(UA_NodeId*)referenceTypeId->data,
+                                            *(UA_QualifiedName*)browseName->data,
+                                            *(UA_ReferenceTypeAttributes*)attr->data, NULL, &result);
     if(retval != UA_STATUSCODE_GOOD)
         return luaL_error(L, "Statuscode is %f", retval);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
@@ -312,10 +270,9 @@ int ua_server_add_reference(lua_State *L) {
     else
         target.nodeId = *(UA_NodeId*)targetId->data;
 
-    UA_StatusCode retval =
-        UA_Server_addReference(server->server, *(UA_NodeId*)sourceId->data,
-                               *(UA_NodeId*)refTypeId->data,
-                               target, *(UA_Boolean*)isForward->data);
+    UA_StatusCode retval = UA_Server_addReference(server->server, *(UA_NodeId*)sourceId->data,
+                                                  *(UA_NodeId*)refTypeId->data,
+                                                  target, *(UA_Boolean*)isForward->data);
     ua_data *data = lua_newuserdata(L, sizeof(ua_data));
     data->type = &UA_TYPES[UA_TYPES_STATUSCODE];
     data->data = UA_StatusCode_new();
@@ -350,7 +307,6 @@ int ua_server_write(lua_State *L) {
     UA_WriteValue wv;
     UA_WriteValue_init(&wv);
     UA_Variant_setScalar(&wv.value.value, value->data, value->type);
-
     lua_pushnumber(L, retval);
     return 1;
 }

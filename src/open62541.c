@@ -1,6 +1,6 @@
 /* THIS IS A SINGLE-FILE DISTRIBUTION CONCATENATED FROM THE OPEN62541 SOURCES 
  * visit http://open62541.org/ for information about this software
- * Git-Revision: v0.1.0-RC4-991-g8feb188
+ * Git-Revision: v0.1.0-RC4-1001-gfb0266d-dirty
  */
  
  /*
@@ -2206,11 +2206,12 @@ typedef struct UA_SessionManager {
     UA_UInt32 lastSessionId;
     UA_UInt32 currentSessionCount;
     UA_UInt32 maxSessionLifeTime;    // time in [ms]
+    UA_Logger logger;
 } UA_SessionManager;
 
 UA_StatusCode
 UA_SessionManager_init(UA_SessionManager *sessionManager, UA_UInt32 maxSessionCount,
-                       UA_UInt32 maxSessionLifeTime, UA_UInt32 startSessionId);
+                       UA_UInt32 maxSessionLifeTime, UA_UInt32 startSessionId, UA_Logger logger);
 
 void UA_SessionManager_deleteMembers(UA_SessionManager *sessionManager, UA_Server *server);
 
@@ -2247,12 +2248,13 @@ typedef struct UA_SecureChannelManager {
     UA_DateTime channelLifeTime;
     UA_UInt32 lastChannelId;
     UA_UInt32 lastTokenId;
+    UA_Logger logger;
 } UA_SecureChannelManager;
 
 UA_StatusCode
 UA_SecureChannelManager_init(UA_SecureChannelManager *cm, size_t maxChannelCount,
                              UA_UInt32 tokenLifetime, UA_UInt32 startChannelId,
-                             UA_UInt32 startTokenId);
+                             UA_UInt32 startTokenId, UA_Logger logger);
 
 void UA_SecureChannelManager_deleteMembers(UA_SecureChannelManager *cm);
 
@@ -3745,7 +3747,7 @@ static const UA_encodeBinarySignature encodeBinaryJumpTable[UA_BUILTIN_TYPES_COU
 typedef UA_StatusCode (*UA_decodeBinarySignature)(bufpos pos, bufend end, void *UA_RESTRICT dst);
 static const UA_decodeBinarySignature decodeBinaryJumpTable[UA_BUILTIN_TYPES_COUNT + 1];
 
-typedef size_t (*UA_calcSizeBinarySignature)(const void *UA_RESTRICT p, const UA_DataType *type);
+typedef size_t (*UA_calcSizeBinarySignature)(const void *UA_RESTRICT p, const UA_DataType *contenttype);
 static const UA_calcSizeBinarySignature calcSizeBinaryJumpTable[UA_BUILTIN_TYPES_COUNT + 1];
 
 UA_THREAD_LOCAL const UA_DataType *type; // used to pass the datatype into the jumptable
@@ -5062,7 +5064,7 @@ static const UA_calcSizeBinarySignature calcSizeBinaryJumpTable[UA_BUILTIN_TYPES
 size_t UA_calcSizeBinary(void *p, const UA_DataType *contenttype) {
     size_t s = 0;
     uintptr_t ptr = (uintptr_t)p;
-    UA_Byte membersSize = type->membersSize;
+    UA_Byte membersSize = contenttype->membersSize;
     const UA_DataType *typelists[2] = { UA_TYPES, &contenttype[-contenttype->typeIndex] };
     for(size_t i = 0; i < membersSize; i++) {
         const UA_DataTypeMember *member = &contenttype->members[i];
@@ -7129,12 +7131,13 @@ UA_Server * UA_Server_new(const UA_ServerConfig config) {
 #define TOKENLIFETIME 600000 //this is in milliseconds //600000 seems to be the minimal allowet time for UaExpert
 #define STARTTOKENID 1
     UA_SecureChannelManager_init(&server->secureChannelManager, MAXCHANNELCOUNT,
-                                 TOKENLIFETIME, STARTCHANNELID, STARTTOKENID);
+                                 TOKENLIFETIME, STARTCHANNELID, STARTTOKENID, server->config.logger);
 
 #define MAXSESSIONCOUNT 1000
-#define MAXSESSIONLIFETIME 10000
+#define MAXSESSIONLIFETIME 3600000
 #define STARTSESSIONID 1
-    UA_SessionManager_init(&server->sessionManager, MAXSESSIONCOUNT, MAXSESSIONLIFETIME, STARTSESSIONID);
+    UA_SessionManager_init(&server->sessionManager, MAXSESSIONCOUNT, MAXSESSIONLIFETIME,
+                           STARTSESSIONID, server->config.logger);
 
     UA_Job cleanup = {.type = UA_JOBTYPE_METHODCALL,
                       .job.methodCall = {.method = UA_Server_cleanup, .data = NULL} };
@@ -9246,14 +9249,16 @@ UA_StatusCode UA_Server_run(UA_Server *server, volatile UA_Boolean *running) {
 
 
 UA_StatusCode
-UA_SecureChannelManager_init(UA_SecureChannelManager *cm, size_t maxChannelCount, UA_UInt32 tokenLifetime,
-                             UA_UInt32 startChannelId, UA_UInt32 startTokenId) {
+UA_SecureChannelManager_init(UA_SecureChannelManager *cm, size_t maxChannelCount,
+                             UA_UInt32 tokenLifetime, UA_UInt32 startChannelId,
+                             UA_UInt32 startTokenId, UA_Logger logger) {
     LIST_INIT(&cm->channels);
     cm->lastChannelId = startChannelId;
     cm->lastTokenId = startTokenId;
     cm->maxChannelLifetime = tokenLifetime;
     cm->maxChannelCount = maxChannelCount;
     cm->currentChannelCount = 0;
+    cm->logger = logger;
     return UA_STATUSCODE_GOOD;
 }
 
@@ -9272,8 +9277,10 @@ void UA_SecureChannelManager_cleanupTimedOut(UA_SecureChannelManager *cm, UA_Dat
     LIST_FOREACH_SAFE(entry, &cm->channels, pointers, temp) {
         UA_DateTime timeout =
             entry->channel.securityToken.createdAt +
-            ((UA_DateTime)entry->channel.securityToken.revisedLifetime * 10000);
+            (UA_DateTime)(entry->channel.securityToken.revisedLifetime * UA_MSEC_TO_DATETIME);
         if(timeout < now || !entry->channel.connection) {
+            UA_LOG_DEBUG(cm->logger, UA_LOGCATEGORY_SECURECHANNEL,
+                         "SecureChannel %i has timed out", entry->channel.securityToken.channelId);
             LIST_REMOVE(entry, pointers);
             UA_SecureChannel_deleteMembersCleanup(&entry->channel);
 #ifndef UA_ENABLE_MULTITHREADING
@@ -9400,12 +9407,14 @@ UA_StatusCode UA_SecureChannelManager_close(UA_SecureChannelManager *cm, UA_UInt
 
 UA_StatusCode
 UA_SessionManager_init(UA_SessionManager *sessionManager, UA_UInt32 maxSessionCount,
-                       UA_UInt32 maxSessionLifeTime, UA_UInt32 startSessionId) {
+                       UA_UInt32 maxSessionLifeTime, UA_UInt32 startSessionId,
+                       UA_Logger logger) {
     LIST_INIT(&sessionManager->sessions);
     sessionManager->maxSessionCount = maxSessionCount;
     sessionManager->lastSessionId   = startSessionId;
     sessionManager->maxSessionLifeTime  = maxSessionLifeTime;
     sessionManager->currentSessionCount = 0;
+    sessionManager->logger = logger;
     return UA_STATUSCODE_GOOD;
 }
 
@@ -9423,6 +9432,8 @@ void UA_SessionManager_cleanupTimedOut(UA_SessionManager *sessionManager,
     session_list_entry *sentry, *temp;
     LIST_FOREACH_SAFE(sentry, &sessionManager->sessions, pointers, temp) {
         if(sentry->session.validTill < now) {
+            UA_LOG_DEBUG(sessionManager->logger, UA_LOGCATEGORY_SESSION, "Session with token %i has timed out and is removed",
+                         sentry->session.sessionId.identifier.numeric);
             LIST_REMOVE(sentry, pointers);
             UA_Session_deleteMembersCleanup(&sentry->session, server);
             UA_free(sentry);
@@ -9436,11 +9447,16 @@ UA_SessionManager_getSession(UA_SessionManager *sessionManager, const UA_NodeId 
     session_list_entry *current = NULL;
     LIST_FOREACH(current, &sessionManager->sessions, pointers) {
         if(UA_NodeId_equal(&current->session.authenticationToken, token)) {
-            if(UA_DateTime_now() > current->session.validTill)
+            if(UA_DateTime_now() > current->session.validTill) {
+                UA_LOG_DEBUG(sessionManager->logger, UA_LOGCATEGORY_SESSION, "Try to use Session with token %i, but has timed out",
+                             token->identifier.numeric);
                 return NULL;
+            }
             return &current->session;
         }
     }
+    UA_LOG_DEBUG(sessionManager->logger, UA_LOGCATEGORY_SESSION, "Try to use Session with token %i but is not found",
+                 token->identifier.numeric);
     return NULL;
 }
 
@@ -12176,7 +12192,7 @@ void Service_UnregisterNodes(UA_Server *server, UA_Session *session, const UA_Un
 
 
 const UA_EXPORT UA_ClientConfig UA_ClientConfig_standard =
-    { .timeout = 5000 /* ms receive timout */, .secureChannelLifeTime = 30000,
+    { .timeout = 5000 /* ms receive timout */, .secureChannelLifeTime = 600000,
       {.protocolVersion = 0, .sendBufferSize = 65536, .recvBufferSize  = 65536,
        .maxMessageSize = 65536, .maxChunkCount = 1}};
 
@@ -12478,7 +12494,7 @@ static UA_StatusCode ActivateSession(UA_Client *client) {
     request.requestHeader.requestHandle = 2; //TODO: is it a magic number?
     request.requestHeader.authenticationToken = client->authenticationToken;
     request.requestHeader.timestamp = UA_DateTime_now();
-    request.requestHeader.timeoutHint = 10000;
+    request.requestHeader.timeoutHint = 600000;
 
     UA_AnonymousIdentityToken identityToken;
     UA_AnonymousIdentityToken_init(&identityToken);

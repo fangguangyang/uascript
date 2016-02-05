@@ -4,31 +4,6 @@
 #include "lualib.h"
 #include "lauxlib.h"
 
-#ifndef _WIN32
-# include <pthread.h>
-#else
-# include <windows.h>
-# include <process.h>
-#endif
-
-#ifndef _WIN32
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-LUA_API void ua_lock_interpreter(lua_State *L) {
-    pthread_mutex_lock(&lock);
-}
-
-LUA_API void ua_unlock_interpreter(lua_State *L) {
-    pthread_mutex_unlock (&lock);
-}
-#else
-LUA_API void ua_lock_interpreter(lua_State *L) {
-}
-
-LUA_API void ua_unlock_interpreter(lua_State *L) {
-}
-#endif
-
-
 static const struct luaL_Reg uascript_module [] = {
     {"typeof", ua_get_type},
     {"Array", ua_array_new},
@@ -55,7 +30,6 @@ static void addAttributeId(lua_State *L, int identifier, const char *name) {
 static int ua_indexerr(lua_State *L) {
     return luaL_error(L, "Type cannot be indexed");
 }
-
 
 int luaopen_uascript(lua_State *L) {
     /* metatable for data types */
@@ -107,6 +81,8 @@ int luaopen_uascript(lua_State *L) {
     lua_newtable(L);
     lua_pushcfunction(L, ua_server_start);
     lua_setfield(L, -2, "start");
+    lua_pushcfunction(L, ua_server_iterate);
+    lua_setfield(L, -2, "iterate");
     lua_pushcfunction(L, ua_server_stop);
     lua_setfield(L, -2, "stop");
     lua_pushcfunction(L, ua_server_add_variablenode);

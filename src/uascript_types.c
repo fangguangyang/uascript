@@ -166,9 +166,7 @@ ua_type_parse(lua_State *L, int index, const UA_DataType *type) {
             return NULL;
         }
         data = UA_new(type);
-    }
-
-    if(type && type->builtin) {
+    } else if(type && type->builtin) {
         switch(type->typeIndex) {
         case UA_TYPES_GUID:
             data = parse_guid(L, index);
@@ -343,15 +341,15 @@ ua_getdata(lua_State *L, int index, const UA_DataType *type) {
             return NULL;
         }
     } else {
-        if(lua_isboolean(L, index)) {
+        if(lua_type(L, index) == LUA_TSTRING) {
+            str = UA_String_fromChars(lua_tostring(L, index));
+            isString = true;
+        } else if(lua_isboolean(L, index)) {
             number = lua_toboolean(L, index);
             isNumber = true;
         } else if(lua_isnumber(L, index)) {
             number = lua_tonumber(L, index);
             isNumber = true;
-        } else if(lua_isstring(L, index)) {
-            str = UA_String_fromChars(lua_tostring(L, index));
-            isString = true;
         } else {
             luaL_error(L, "Cannot convert from native Lua type");
             return NULL;
@@ -443,6 +441,7 @@ ua_getdata(lua_State *L, int index, const UA_DataType *type) {
     return data;
 }
 
+// replaced index with the array
 ua_array *
 ua_getarray(lua_State *L, int index) {
     ua_array *array = luaL_testudata(L, index , "open62541-array");
@@ -506,8 +505,13 @@ find_memberindex(const UA_DataType *type, const char *membername) {
 }
 
 /* get the pointer to the member and the array length if an array */
-static void *
-memberptr(void *parent, const UA_DataType *type, int memberindex, size_t **arraylen) {
+void *
+ua_getmember(void *parent, const UA_DataType *type, const char *membername,
+             const UA_DataType **memberType, size_t **arraylen) {
+    int memberindex = find_memberindex(type, membername);
+    if(memberindex < 0)
+        return NULL;
+    const UA_DataType *typelists[2] = { UA_TYPES, &type[-type->typeIndex] };
     uintptr_t ptr = (uintptr_t)parent;
     const UA_DataTypeMember *member;
     for(int i = 0; i < memberindex; i++) {
@@ -518,6 +522,8 @@ memberptr(void *parent, const UA_DataType *type, int memberindex, size_t **array
             ptr += member->padding + sizeof(size_t) + sizeof(void*);
     }
     member = &type->members[memberindex];
+    if(memberType)
+    *memberType = &typelists[!member->namespaceZero][member->memberTypeIndex];
     if(member->isArray) {
         ptr += member->padding;
         *arraylen = (size_t*)ptr;
@@ -740,20 +746,18 @@ static int ua_index_key(lua_State *L, int dataindex, const char *key) {
         return ua_expandednodeid_index(L, dataindex, data->data, key);
     if(data->type == &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])
         return ua_localizedtext_index(L, dataindex, data->data, key);
-    else if(data->type == &UA_TYPES[UA_TYPES_VARIANT])
+    if(data->type == &UA_TYPES[UA_TYPES_VARIANT])
         return ua_variant_index(L, dataindex, data->data, key);
-    else if(data->type == &UA_TYPES[UA_TYPES_DATAVALUE])
+    if(data->type == &UA_TYPES[UA_TYPES_DATAVALUE])
         return ua_datavalue_index(L, dataindex, data->data, key);
-    else if(data->type == &UA_TYPES[UA_TYPES_DIAGNOSTICINFO])
+    if(data->type == &UA_TYPES[UA_TYPES_DIAGNOSTICINFO])
         return ua_diagnosticinfo_index(L, dataindex, data->data, key);
 
-    int memberindex = find_memberindex(data->type, key);
-    if(memberindex < 0)
-        return luaL_error(L, "Cannot get this index %d", memberindex);
-
+    const UA_DataType *type;
     size_t *arraylen;
-    void *member = memberptr(data->data, data->type, memberindex, &arraylen);
-    const UA_DataType *type = &UA_TYPES[data->type->members[memberindex].memberTypeIndex];
+    void *member = ua_getmember(data->data, data->type, key, &type, &arraylen);
+    if(!member)
+        return luaL_error(L, "Cannot get this index %s", key);
     if(arraylen)
         return ua_return_memberarray(L, dataindex, member, arraylen, type);
     return ua_return_member(L, dataindex, member, type);
@@ -771,6 +775,92 @@ int ua_index(lua_State *L) {
 /************/
 /* Newindex */
 /************/
+
+static int
+ua_nodeid_newindex(lua_State *L, UA_NodeId *id, const char *key, int index) {
+    if(strcmp(key, "namespaceIndex") == 0) {
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_UINT32]);
+        id->namespaceIndex = *(UA_UInt32*)data->data;
+        return 0;
+    }
+    if(strcmp(key, "identifier") == 0) {
+        ua_data *data = luaL_testudata(L, index , "open62541-data");
+        if(data) {
+            if(data->type == &UA_TYPES[UA_TYPES_UINT32]) {
+                UA_NodeId_deleteMembers(id);
+                id->identifier.numeric = *(UA_UInt32*)data->data;
+                id->identifierType = UA_NODEIDTYPE_NUMERIC;
+            } else if(data->type == &UA_TYPES[UA_TYPES_GUID]) {
+                UA_NodeId_deleteMembers(id);
+                id->identifier.guid = *(UA_Guid*)data->data;
+                id->identifierType = UA_NODEIDTYPE_GUID;
+            } else if(data->type == &UA_TYPES[UA_TYPES_STRING]) {
+                UA_NodeId_deleteMembers(id);
+                UA_String_copy(data->data, &id->identifier.string);
+                id->identifierType = UA_NODEIDTYPE_STRING;
+            } else if(data->type == &UA_TYPES[UA_TYPES_BYTESTRING]) {
+                UA_NodeId_deleteMembers(id);
+                UA_ByteString_copy(data->data, &id->identifier.byteString);
+                id->identifierType = UA_NODEIDTYPE_BYTESTRING;
+            } else {
+                return luaL_error(L, "Not a valid nodeid index");
+            }
+        } else {
+            if(lua_type(L, index) == LUA_TSTRING) {
+                UA_NodeId_deleteMembers(id);
+                id->identifier.string = UA_String_fromChars(lua_tostring(L, index));
+                id->identifierType = UA_NODEIDTYPE_STRING;
+            } else if(lua_isnumber(L, index)) {
+                UA_NodeId_deleteMembers(id);
+                id->identifier.numeric = lua_tointeger(L, index);
+                id->identifierType = UA_NODEIDTYPE_NUMERIC;
+            } else {
+                return luaL_error(L, "Not a valid nodeid index");
+            }
+        }
+        return 0;
+    }
+    return luaL_error(L, "Not a valid nodeid index");
+}
+
+static int
+ua_expandednodeid_newindex(lua_State *L, UA_ExpandedNodeId *id, const char *key, int index) {
+    if(strcmp(key, "nodeId") == 0) {
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_NODEID]);
+        UA_NodeId_deleteMembersa(&id->nodeId);
+        UA_NodeId_copy(data->data, &id->nodeId);
+        return 0;
+    }
+    if(strcmp(key, "namespaceUri") == 0) {
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_STRING]);
+        UA_String_deleteMembers(&id->namespaceUri);
+        UA_String_copy(data->data, &id->namespaceUri);
+        return 0;
+    }
+    if(strcmp(key, "serverIndex") == 0) {
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_UINT32]);
+        id->serverIndex = *(UA_UInt32*)data->data;
+        return 0;
+    }
+    return luaL_error(L, "Not a valid ExpandedNodeId index");
+}
+
+static int
+ua_localizedtext_newindex(lua_State *L, UA_LocalizedText *lt, const char *key, int index) {
+    if(strcmp(key, "locale") == 0) {
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_STRING]);
+        UA_String_deleteMembers(&lt->locale);
+        UA_String_copy(data->data, &lt->locale);
+        return 0;
+    }
+    if(strcmp(key, "text") == 0) {
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_STRING]);
+        UA_String_deleteMembers(&lt->text);
+        UA_String_copy(data->data, &lt->text);
+        return 0;
+    }
+    return luaL_error(L, "Cannot get this index %s", key);
+}
 
 static int
 ua_variant_newindex(lua_State *L, UA_Variant *v, const char *key, int index) {
@@ -814,21 +904,120 @@ ua_variant_newindex(lua_State *L, UA_Variant *v, const char *key, int index) {
     return luaL_error(L, "Not a valid variant index");
 }
 
+static int
+ua_datavalue_newindex(lua_State *L, UA_DataValue *v, const char *key, int index) {
+    if(strcmp(key, "value") == 0) {
+        if(lua_isnil(L, index)) {
+            v->hasValue = false;
+            UA_Variant_deleteMembers(&v->value);
+            return 0;
+        }
+        ua_data *data = luaL_testudata(L, index , "open62541-data");
+        if(data && data->type == &UA_TYPES[UA_TYPES_VARIANT]) {
+            UA_Variant_deleteMembers(&v->value);
+            UA_Variant_copy(data->data, &v->value);
+        } else
+            ua_variant_newindex(L, &v->value, key, index);
+        v->hasValue = true;
+        return 0;
+    }
+
+    if(strcmp(key, "status") == 0) {
+        if(lua_isnil(L, index)) {
+            v->status = UA_STATUSCODE_GOOD;
+            v->hasStatus = false;
+            return 0;
+        }
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_STATUSCODE]);
+        if(data) {
+            v->status = *(UA_StatusCode*)data->data;
+            v->hasStatus = true;
+        }
+        return 0;
+    }
+
+    if(strcmp(key, "sourceTimestamp") == 0) {
+        if(lua_isnil(L, index)) {
+            v->sourceTimestamp = 0;
+            v->hasSourceTimestamp = false;
+            return 0;
+        }
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_DATETIME]);
+        if(data) {
+            v->sourceTimestamp = *(UA_DateTime*)data->data;
+            v->hasSourceTimestamp = true;
+        }
+        return 0;
+    }
+
+    if(strcmp(key, "sourcePicoseconds") == 0) {
+        if(lua_isnil(L, index)) {
+            v->sourcePicoseconds = 0;
+            v->hasSourcePicoseconds = false;
+            return 0;
+        }
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_UINT16]);
+        if(data) {
+            v->sourcePicoseconds = *(UA_UInt16*)data->data;
+            v->hasSourcePicoseconds = true;
+        }
+        return 0;
+    }
+
+    if(strcmp(key, "serverTimestamp") == 0) {
+        if(lua_isnil(L, index)) {
+            v->serverTimestamp = 0;
+            v->hasServerTimestamp = false;
+            return 0;
+        }
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_DATETIME]);
+        if(data) {
+            v->serverTimestamp = *(UA_DateTime*)data->data;
+            v->hasServerTimestamp = true;
+        }
+        return 0;
+    }
+    
+    if(strcmp(key, "serverPicoseconds") == 0) {
+        if(lua_isnil(L, index)) {
+            v->serverPicoseconds = 0;
+            v->hasServerPicoseconds = false;
+            return 0;
+        }
+        ua_data *data = ua_getdata(L, index, &UA_TYPES[UA_TYPES_UINT16]);
+        if(data) {
+            v->serverPicoseconds = *(UA_UInt16*)data->data;
+            v->hasServerPicoseconds = true;
+        }
+        return 0;
+    }
+                
+    return luaL_error(L, "Not a valid datavalue index");
+}
+
+// value, key, member
 int ua_newindex(lua_State *L) {
     ua_data *parent = luaL_checkudata (L, 1, "open62541-data");
     if(!lua_isstring(L, 2))
         return luaL_error(L, "Index must be a string");
-    /* variants have a special newindex */
     const char *key = lua_tostring(L, 2);
+
+    if(parent->type == &UA_TYPES[UA_TYPES_NODEID])
+        return ua_nodeid_newindex(L, parent->data, key, 3);
+    if(parent->type == &UA_TYPES[UA_TYPES_EXPANDEDNODEID])
+        return ua_expandednodeid_newindex(L, parent->data, key, 3);
+    if(parent->type == &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])
+        return ua_localizedtext_newindex(L, parent->data, key, 3);
     if(parent->type == &UA_TYPES[UA_TYPES_VARIANT])
         return ua_variant_newindex(L, parent->data, key, 3);
-    int memberindex = find_memberindex(parent->type, key);
-    if(memberindex < 0)
-        return luaL_error(L, "Index not found");
+    if(parent->type == &UA_TYPES[UA_TYPES_DATAVALUE])
+        return ua_datavalue_newindex(L, parent->data, key, 3);
 
-    const UA_DataType *membertype = &UA_TYPES[parent->type->members[memberindex].memberTypeIndex];
+    const UA_DataType *membertype;
     size_t *arraylen;
-    void *member = memberptr(parent->data, parent->type, memberindex, &arraylen);
+    void *member = ua_getmember(parent->data, parent->type, key, &membertype, &arraylen);
+    if(!member)
+        return luaL_error(L, "Index not found");
 
     if(arraylen) {
         ua_array *array = ua_getarray(L, 3);
@@ -959,8 +1148,7 @@ ua_tostring_structured(lua_State *L, size_t level) {
     ua_data *d = luaL_testudata(L, -1, "open62541-data");
     lua_pushnil(L);
     int k_index = lua_gettop(L);
-    lua_pushfstring(L, "ua.types.%s:", d->type->typeName);
-    int pushed = 1;
+    int pushed = 0;
     while(true) {
         int ret = ua_iterate_atindex(L, k_index-1);
         if(ret == 0)
@@ -969,12 +1157,15 @@ ua_tostring_structured(lua_State *L, size_t level) {
         lua_replace(L, k_index);
         int v_index = lua_gettop(L);
 
-        lua_pushstring(L, "\n");
+        if(level > 0 || pushed != 0) {
+            lua_pushstring(L, "\n");
+            pushed++;
+        }
         for(size_t j = 0; j < level; j++)
             lua_pushstring(L, "  ");
         lua_pushvalue(L, k_index);
         lua_pushstring(L, " = ");
-        pushed += level + 3;
+        pushed += level + 2;
 
         lua_pushvalue(L, v_index);
         lua_remove(L, v_index);

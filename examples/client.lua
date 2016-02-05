@@ -1,10 +1,16 @@
-r1 = ua.types.ReadValueId()
-r1.nodeid = ua.types.NodeId(1,96)
-r1.attributeid = 13
-r = ua.types.ReadRequest()
-r.nodestoread[1] = r1
 c = ua.Client()
 c:connect("opc.tcp://127.0.0.1:16664")
-res = c:read(r)
+
+w1 = ua.types.WriteValue()
+w1.nodeId = ua.types.NodeId(1, "the.answer")
+w1.attributeId = ua.attributeIds.Value
+w1.value.value = ua.types.Int32(43)
+c:write(w1)
+
+r1 = ua.types.ReadValueId()
+r1.nodeId = ua.types.NodeId(1, "the.answer")
+r1.attributeId = ua.attributeIds.Value
+res = c:read(r1)
 print(res)
+
 c:disconnect()

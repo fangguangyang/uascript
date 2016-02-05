@@ -16,9 +16,6 @@ extern "C" {
 #include "lua.h"
 //#include "compat-5.2.h"
 
-void ua_lock_interpreter(lua_State *L);
-void ua_unlock_interpreter(lua_State *L);
-
 /* Types are a table with a single lightuserdata entry at index 1, that points
    to the UA_TYPES entry */
 
@@ -43,6 +40,8 @@ int ua_tostring(lua_State *L);
 int ua_pairs(lua_State *L);
 ua_data * ua_getdata(lua_State *L, int index, const UA_DataType *type);
 int ua_get_type(lua_State *L);
+void * ua_getmember(void *parent, const UA_DataType *type, const char *membername,
+                    const UA_DataType **memberType, size_t **arraylen);
 
 /* Arrays are of a special type and have a different metatable. Arrays cannot be
    created standalone, but are always part of an enclosing type. Indexing arrays
@@ -70,6 +69,7 @@ ua_array * ua_getarray(lua_State *L, int index);
 int ua_server_new(lua_State *L);
 int ua_server_gc(lua_State *L);
 int ua_server_start(lua_State *L);
+int ua_server_iterate(lua_State *L);
 int ua_server_stop(lua_State *L);
 int ua_server_add_variablenode(lua_State *L);
 int ua_server_add_objectnode(lua_State *L);

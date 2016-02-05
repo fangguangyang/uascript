@@ -1,6 +1,6 @@
 /* THIS IS A SINGLE-FILE DISTRIBUTION CONCATENATED FROM THE OPEN62541 SOURCES 
  * visit http://open62541.org/ for information about this software
- * Git-Revision: v0.1.0-RC4-991-g8feb188
+ * Git-Revision: v0.1.0-RC4-1001-gfb0266d-dirty
  */
  
  /*
@@ -75,8 +75,7 @@ extern "C" {
 // UA_NON_LITTLEENDIAN_ARCHITECTURE disables memcpying integer arrays directly
 // onto the message buffer. UA_MIXED_ENDIAN enables special encoding for floats
 // and doubles. Otherwise, they are endianness-switched similar to integers.
-
-#if defined(__LITTLE_ENDIAN__) || defined(_WIN32) || (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#if defined(__LITTLE_ENDIAN__) || defined(_WIN32) || (!defined(__ANDROID__) && BYTE_ORDER == ORDER_LITTLE_ENDIAN)
 # define htole16(x) (x)
 # define htole32(x) (x)
 # define htole64(x) (x)

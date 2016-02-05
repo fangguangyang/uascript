@@ -235,4 +235,7 @@ server:addMethodNode(ua.nodeIds.Null, ua.nodeIds.Objects,
 res = server:write(usbversion_id, ua.attributeIds.Value, ua.types.Int32(5))
 
 server:start()
+while true do
+   server:iterate()
+end
 --server:stop()

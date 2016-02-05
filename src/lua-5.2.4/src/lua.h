@@ -55,10 +55,8 @@ typedef struct lua_State lua_State;
 
 typedef int (*lua_CFunction) (lua_State *L);
 
-/* Custom locking */
-#include "uascript.h"
-#define lua_lock(L) ua_lock_interpreter(L)
-#define lua_unlock(L) ua_unlock_interpreter(L)
+#define lua_lock(L)
+#define lua_unlock(L)
 
 
 /*
