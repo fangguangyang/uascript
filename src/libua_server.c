@@ -157,15 +157,15 @@ struct callbackdata {
 };
 
 static UA_StatusCode
-ua_server_methodcallback(void *methodHandle, const UA_NodeId objectId,
-                         size_t inputSize, const UA_Variant *input,
-                         size_t outputSize, UA_Variant *output) {
+ua_server_methodcallback(void *methodHandle, const UA_NodeId objectId, size_t inputSize,
+                         const UA_Variant *input, size_t outputSize, UA_Variant *output) {
     struct callbackdata *data = methodHandle;
     lua_State *L = lua_newthread(data->L);
     /* get the function */
     lua_pushlightuserdata(L, data->functionindex);
     lua_gettable(L, LUA_REGISTRYINDEX);
 
+    int top = lua_gettop(L);
     ua_data *id = lua_newuserdata(L, sizeof(ua_data));
     id->data = UA_NodeId_new();
     UA_NodeId_copy(&objectId, id->data);
@@ -187,7 +187,7 @@ ua_server_methodcallback(void *methodHandle, const UA_NodeId objectId,
     }
 
     for(size_t j = 0; j < outputSize; j++) {
-        ua_data *out = ua_getdata(L, -outputSize-1, NULL);
+        ua_data *out = ua_getdata(L, top+j, NULL);
         if(out) {
             if(out->type == &UA_TYPES[UA_TYPES_VARIANT])
                 UA_Variant_copy(out->data, &output[j]);
@@ -216,10 +216,10 @@ int ua_server_add_methodnode(lua_State *L) {
     ua_data *attr = ua_getdata(L, 6, &UA_TYPES[UA_TYPES_METHODATTRIBUTES]);
     if(!lua_isfunction(L, 7))
         return luaL_error(L, "6th argument (method) is not of function type");
-    ua_array *input = luaL_checkudata(L, 8, "open62541-array");
+    ua_array *input = ua_getarray(L, 8);
     if(!input || (input->type && input->type != &UA_TYPES[UA_TYPES_ARGUMENT]))
         return luaL_error(L, "7th argument (inputarguments) is not an array of arguments");
-    ua_array *output = luaL_checkudata(L, 9, "open62541-array");
+    ua_array *output = ua_getarray(L, 9);
     if(!output || (output->type && output->type != &UA_TYPES[UA_TYPES_ARGUMENT]))
         return luaL_error(L, "8th argument (outputarguments) is not an array of arguments");
 
