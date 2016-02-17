@@ -1,6 +1,6 @@
 /* THIS IS A SINGLE-FILE DISTRIBUTION CONCATENATED FROM THE OPEN62541 SOURCES 
  * visit http://open62541.org/ for information about this software
- * Git-Revision: v0.1.0-RC4-1036-ga76ba5f-dirty
+ * Git-Revision: v0.1.0-RC4-1037-ge452dcf-dirty
  */
  
  /*
