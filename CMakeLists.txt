@@ -83,6 +83,8 @@ file(GLOB executable_sources ${PROJECT_SOURCE_DIR}/src/lua-5.2.4/*.c)
 add_library(ua SHARED ${lib_sources})
 
 # remove compiler flags for lua
-add_definitions(-Wno-cast-qual -Wno-format-nonliteral -Wno-strict-overflow)
+if(CMAKE_COMPILER_IS_GNUCC OR "x${CMAKE_C_COMPILER_ID}" STREQUAL "xClang")
+  add_definitions(-Wno-cast-qual -Wno-format-nonliteral -Wno-strict-overflow)
+endif()
 add_executable(uascript ${lib_sources} ${executable_sources} ${PROJECT_SOURCE_DIR}/src/uascript.c)
 target_link_libraries(uascript m)
