@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.11)
-project(open62541 C)
-set(CMAKE_VERBOSE_MAKEFILE ON)
+project(uascript C)
+#set(CMAKE_VERBOSE_MAKEFILE ON)
 
 ####################################
 # Build Type and Compiler Settings #
