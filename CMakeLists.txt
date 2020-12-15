@@ -14,7 +14,7 @@ endif()
 
 # compiler flags
 if(CMAKE_COMPILER_IS_GNUCC OR "x${CMAKE_C_COMPILER_ID}" STREQUAL "xClang")
-    add_definitions(-std=c99 -pipe -Wall -Wextra -Werror -Wformat -Wno-unused-parameter
+    add_definitions(-std=c99 -pipe -Wall -Wextra -Wformat -Wno-unused-parameter
                     -Wno-unused-function -Wno-unused-label -Wpointer-arith -Wreturn-type #-Wsign-compare
                     -Wmultichar -Wstrict-overflow -Wcast-qual -Wmissing-prototypes -Wstrict-prototypes
                     -Winit-self -Wuninitialized -Wformat-security -Wformat-nonliteral
@@ -70,7 +70,11 @@ endif()
 #################
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
-include_directories(${PROJECT_SOURCE_DIR}/src/lua-5.2.4)
+include_directories(${PROJECT_SOURCE_DIR}/src/lua)
+include_directories(${PROJECT_SOURCE_DIR}/mbedtls/include)
+include_directories(../skynet/skynet-src)
+
+link_directories(${PROJECT_SOURCE_DIR}/mbedtls/library)
 
 set(lib_sources ${PROJECT_SOURCE_DIR}/src/libua.c
                 ${PROJECT_SOURCE_DIR}/src/libua_types.c
@@ -78,9 +82,10 @@ set(lib_sources ${PROJECT_SOURCE_DIR}/src/libua.c
                 ${PROJECT_SOURCE_DIR}/src/libua_client.c
                 ${PROJECT_SOURCE_DIR}/src/open62541.c)
 
-file(GLOB executable_sources ${PROJECT_SOURCE_DIR}/src/lua-5.2.4/*.c)
+file(GLOB executable_sources ${PROJECT_SOURCE_DIR}/src/lua/*.c)
 
 add_library(ua SHARED ${lib_sources})
+set_target_properties(ua PROPERTIES  PREFIX "")
 
 # remove compiler flags for lua
 if(CMAKE_COMPILER_IS_GNUCC OR "x${CMAKE_C_COMPILER_ID}" STREQUAL "xClang")

@@ -105,12 +105,12 @@ static void laction (int i) {
 
 
 static void print_usage (const char *badoption) {
-  luai_writestringerror("%s: ", progname);
+  lua_writestringerror("%s: ", progname);
   if (badoption[1] == 'e' || badoption[1] == 'l')
-    luai_writestringerror("'%s' needs argument\n", badoption);
+    lua_writestringerror("'%s' needs argument\n", badoption);
   else
-    luai_writestringerror("unrecognized option '%s'\n", badoption);
-  luai_writestringerror(
+    lua_writestringerror("unrecognized option '%s'\n", badoption);
+  lua_writestringerror(
   "usage: %s [options] [script [args]]\n"
   "Available options are:\n"
   "  -e stat  execute string " LUA_QL("stat") "\n"
@@ -126,8 +126,8 @@ static void print_usage (const char *badoption) {
 
 
 static void l_message (const char *pname, const char *msg) {
-  if (pname) luai_writestringerror("%s: ", pname);
-  luai_writestringerror("%s\n", msg);
+  if (pname) lua_writestringerror("%s: ", pname);
+  lua_writestringerror("%s\n", msg);
 }
 
 
@@ -184,8 +184,8 @@ static int docall (lua_State *L, int narg, int nres) {
 #define UASCRIPT_COPYRIGHT "uascript v0.1 based on\n"
 
 static void print_version (void) {
-  luai_writestring(LUA_COPYRIGHT, strlen(LUA_COPYRIGHT));
-  luai_writeline();
+  lua_writestring(LUA_COPYRIGHT, strlen(LUA_COPYRIGHT));
+  lua_writeline();
 }
 
 
@@ -585,7 +585,7 @@ static void dotty (lua_State *L) {
     }
   }
   lua_settop(L, 0);  /* clear stack */
-  luai_writeline();
+  lua_writeline();
   lua_rl_exit(L);
   progname = oldprogname;
 }
@@ -728,7 +728,7 @@ static int pmain (lua_State *L) {
   /* open62541 lib */
   lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);
   lua_pushstring(L, "ua");
-  luaopen_libua(L);
+  luaopen_ua(L);
   lua_settable(L, -3);
   lua_pop(L, 1);
   /* end open62541 lib */

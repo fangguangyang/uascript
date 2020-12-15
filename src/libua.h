@@ -119,7 +119,7 @@ int ua_client_getendpoints(lua_State *L);
 #endif
 
 /* Populate the Module */
-int EXPORT luaopen_libua(lua_State *L);
+int EXPORT luaopen_ua(lua_State *L);
 
 #ifdef __cplusplus
 }

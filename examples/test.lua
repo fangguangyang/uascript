@@ -1,6 +1,12 @@
+local root = "/icore/eg/"
+package.path = root .. "mod/?.lua;" .. root .. "mod/?/init.lua;" .. root .. "expand/?.lua;" .. root .. "business/?.lua;"
+package.cpath = "../build/?.so"
+local ua = require "ua"
+local inspect = require "inspect"
 -- initialize the server
 server = ua.Server(16664)
-
+print(inspect(ua.nodeIds))
+print(inspect(ua.nodeIds.Null))
 -- entity objecttype
 local requested_nodeid = ua.nodeIds.Null
 local parent_nodeid = ua.nodeIds.BaseObjectType
@@ -8,8 +14,7 @@ local reference_nodeid = ua.nodeIds.HasSubtype
 local browsename = ua.types.QualifiedName(1, "Entity")
 local attr = ua.types.ObjectTypeAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Entity")
-local entity_id = server:addObjectTypeNode(requested_nodeid, parent_nodeid,
-                                           reference_nodeid, browsename, attr)
+local entity_id = server:addObjectTypeNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, attr)
 
 -- interface objecttype
 local requested_nodeid = ua.nodeIds.Null
@@ -18,8 +23,7 @@ local reference_nodeid = ua.nodeIds.HasSubtype
 local browsename = ua.types.QualifiedName(1, "Interface")
 local attr = ua.types.ObjectTypeAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Interface")
-local interface_id = server:addObjectTypeNode(requested_nodeid, parent_nodeid,
-                                              reference_nodeid, browsename, attr)
+local interface_id = server:addObjectTypeNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, attr)
 
 -- connectedwith referencetype
 local requested_nodeid = ua.nodeIds.Null
@@ -29,8 +33,7 @@ local browsename = ua.types.QualifiedName(1, "ConnectedWith")
 local attr = ua.types.ReferenceTypeAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "ConnectedWith")
 attr.symmetric = true
-connectedwith_id = server:addReferenceTypeNode(requested_nodeid, parent_nodeid,
-                                               reference_nodeid, browsename, attr)
+connectedwith_id = server:addReferenceTypeNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, attr)
 
 -- administrationshell objecttype
 local requested_nodeid = ua.nodeIds.Null
@@ -39,8 +42,7 @@ local reference_nodeid = ua.nodeIds.HasSubtype
 local browsename = ua.types.QualifiedName(1, "AdministrationShell")
 local attr = ua.types.ObjectTypeAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "AdministrationShell")
-local as_id = server:addObjectTypeNode(requested_nodeid, parent_nodeid,
-                                           reference_nodeid, browsename, attr)
+local as_id = server:addObjectTypeNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, attr)
 -- administrationshell identifier
 local requested_nodeid = ua.nodeIds.Null
 local parent_nodeid = as_id
@@ -49,8 +51,7 @@ local browsename = ua.types.QualifiedName(1, "identifier")
 local attr = ua.types.VariableAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Identifier")
 attr.value.value = ua.types.NodeId()
-local as_identifier_id = server:addVariableNode(requested_nodeid, parent_nodeid,
-                                                reference_nodeid, browsename, ua.nodeIds.Null, attr)
+local as_identifier_id = server:addVariableNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, ua.nodeIds.Null, attr)
 
 -- administrates referencetype
 local requested_nodeid = ua.nodeIds.Null
@@ -60,8 +61,7 @@ local browsename = ua.types.QualifiedName(1, "Administrates")
 local attr = ua.types.ReferenceTypeAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Administrates")
 attr.inverseName = ua.types.LocalizedText("en_US", "AdministeredBy")
-local administrates_id = server:addReferenceTypeNode(requested_nodeid, parent_nodeid,
-                                                     reference_nodeid, browsename, attr)
+local administrates_id = server:addReferenceTypeNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, attr)
 
 -- usb interface
 local requested_nodeid = ua.nodeIds.Null
@@ -70,8 +70,7 @@ local reference_nodeid = ua.nodeIds.HasSubtype
 local browsename = ua.types.QualifiedName(1, "USBInterface")
 local attr = ua.types.ObjectTypeAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "USBInterface")
-local usb_id = server:addObjectTypeNode(requested_nodeid, parent_nodeid,
-                                              reference_nodeid, browsename, attr)
+local usb_id = server:addObjectTypeNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, attr)
 
 local requested_nodeid = ua.nodeIds.Null
 local parent_nodeid = usb_id
@@ -81,8 +80,7 @@ local typeidentifier = ua.nodeIds.Null
 local attr = ua.types.VariableAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "USBVersion")
 attr.value.value = ua.types.Int32()
-usbversion_id = server:addVariableNode(requested_nodeid, parent_nodeid, reference_nodeid,
-                            browsename, typeidentifier, attr)
+usbversion_id = server:addVariableNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 local requested_nodeid = ua.nodeIds.Null
 local parent_nodeid = usb_id
@@ -92,8 +90,7 @@ local typeidentifier = ua.nodeIds.Null
 local attr = ua.types.VariableAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "USBConnectorType")
 attr.value.value = ua.types.Int32()
-id = server:addVariableNode(requested_nodeid, parent_nodeid, reference_nodeid,
-                            browsename, typeidentifier, attr)
+id = server:addVariableNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 -- entities
 local requested_nodeid = ua.nodeIds.Null
@@ -103,8 +100,7 @@ local browsename = ua.types.QualifiedName(1, "Entities")
 local typeidentifier = ua.nodeIds.FolderType
 local attr = ua.types.ObjectAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Entities")
-entities_id = server:addObjectNode(requested_nodeid, parent_nodeid,
-                                 reference_nodeid, browsename, typeidentifier, attr)
+entities_id = server:addObjectNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 -- office
 local requested_nodeid = ua.nodeIds.Null
@@ -114,8 +110,7 @@ local browsename = ua.types.QualifiedName(1, "Office")
 local typeidentifier = entity_id
 local attr = ua.types.ObjectAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Office")
-office_id = server:addObjectNode(requested_nodeid, parent_nodeid,
-                                 reference_nodeid, browsename, typeidentifier, attr)
+office_id = server:addObjectNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 -- computer
 local requested_nodeid = ua.nodeIds.Null
@@ -125,8 +120,7 @@ local browsename = ua.types.QualifiedName(1, "Computer")
 local typeidentifier = entity_id
 local attr = ua.types.ObjectAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Computer")
-computer_id = server:addObjectNode(requested_nodeid, parent_nodeid,
-                                   reference_nodeid, browsename, typeidentifier, attr)
+computer_id = server:addObjectNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 local requested_nodeid = ua.nodeIds.Null
 local parent_nodeid = computer_id
@@ -136,8 +130,7 @@ local typeidentifier = ua.nodeIds.Null
 local attr = ua.types.VariableAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Speed")
 attr.value.value = ua.types.Int32()
-id = server:addVariableNode(requested_nodeid, parent_nodeid,
-                            reference_nodeid, browsename, typeidentifier, attr)
+id = server:addVariableNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 -- computer usb
 local requested_nodeid = ua.nodeIds.Null
@@ -147,8 +140,7 @@ local browsename = ua.types.QualifiedName(1, "ComputerUSB")
 local typeidentifier = usb_id
 local attr = ua.types.ObjectAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "ComputerUSB")
-local computerusb_id = server:addObjectNode(requested_nodeid, parent_nodeid,
-                                            reference_nodeid, browsename, typeidentifier, attr)
+local computerusb_id = server:addObjectNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 -- mouse
 local requested_nodeid = ua.nodeIds.Null
@@ -158,8 +150,7 @@ local browsename = ua.types.QualifiedName(1, "Mouse")
 local typeidentifier = entity_id
 local attr = ua.types.ObjectAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Mouse")
-mouse_id = server:addObjectNode(requested_nodeid, parent_nodeid,
-                                reference_nodeid, browsename, typeidentifier, attr)
+mouse_id = server:addObjectNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 local requested_nodeid = ua.nodeIds.Null
 local parent_nodeid = mouse_id
@@ -168,8 +159,7 @@ local browsename = ua.types.QualifiedName(1, "Resolution")
 local typeidentifier = ua.nodeIds.Null
 local attr = ua.types.VariableAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Resolution")
-id = server:addVariableNode(requested_nodeid, parent_nodeid,
-                            reference_nodeid, browsename, typeidentifier, attr)
+id = server:addVariableNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 -- mouse usb
 local requested_nodeid = ua.nodeIds.Null
@@ -179,8 +169,7 @@ local browsename = ua.types.QualifiedName(1, "MouseUSB")
 local typeidentifier = usb_id
 local attr = ua.types.ObjectAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "MouseUSB")
-local mouseusb_id = server:addObjectNode(requested_nodeid, parent_nodeid,
-                                         reference_nodeid, browsename, typeidentifier, attr)
+local mouseusb_id = server:addObjectNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 -- mouse <--> computer usb
 local source = mouseusb_id
@@ -197,8 +186,7 @@ local browsename = ua.types.QualifiedName(1, "Administration Shells")
 local typeidentifier = ua.nodeIds.FolderType
 local attr = ua.types.ObjectAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Administration Shells")
-shells_id = server:addObjectNode(requested_nodeid, parent_nodeid,
-                                 reference_nodeid, browsename, typeidentifier, attr)
+shells_id = server:addObjectNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 -- computer admin shell
 local requested_nodeid = ua.nodeIds.Null
@@ -208,8 +196,7 @@ local browsename = ua.types.QualifiedName(1, "Computer Admin Shell")
 local typeidentifier = as_id
 local attr = ua.types.ObjectAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Computer Admin Shell")
-cas_id = server:addObjectNode(requested_nodeid, parent_nodeid,
-                              reference_nodeid, browsename, typeidentifier, attr)
+cas_id = server:addObjectNode(requested_nodeid, parent_nodeid, reference_nodeid, browsename, typeidentifier, attr)
 
 -- computer admin shell -> computer
 local source = computer_id
@@ -220,22 +207,20 @@ server:addReference(source, reftype, target, isforward)
 
 -- add method
 function test(objectid, ...)
-   print(objectid)
-   return 1,2
+	print(objectid)
+	return 1, 2
 end
 
 browsename = ua.types.QualifiedName(1, "Test Method")
 attr = ua.types.MethodAttributes()
 attr.displayName = ua.types.LocalizedText("en_US", "Test Method")
 attr.executable = true
-server:addMethodNode(ua.nodeIds.Null, ua.nodeIds.Objects,
-               ua.nodeIds.HasComponent, browsename,
-               attr, test, ua.Array(ua.types.Argument, 0), ua.Array(ua.types.Argument, 0))
+server:addMethodNode(ua.nodeIds.Null, ua.nodeIds.Objects, ua.nodeIds.HasComponent, browsename, attr, test, ua.Array(ua.types.Argument, 0), ua.Array(ua.types.Argument, 0))
 
 res = server:write(usbversion_id, ua.attributeIds.Value, ua.types.Int32(5))
 
 server:start()
 while true do
-   server:iterate()
+	server:iterate()
 end
 --server:stop()

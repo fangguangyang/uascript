@@ -32,7 +32,7 @@ static int ua_indexerr(lua_State *L) {
     return luaL_error(L, "Type cannot be indexed");
 }
 
-int luaopen_libua(lua_State *L) {
+int luaopen_ua(lua_State *L) {
     /* metatable for data types */
     luaL_newmetatable(L, "open62541-type");
     lua_pushcfunction(L, ua_type_tostring);
